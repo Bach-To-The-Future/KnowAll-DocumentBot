@@ -1,0 +1,10 @@
+dotenv==0.9.9
+hdfs==2.7.3
+minio==7.2.15
+boto3==1.38.31
+pymongo==4.13.0
+pyarrow==20.0.0
+pandas==2.2.3
+numpy==2.2.6
+llama-index==0.12.41
+chardet==5.2.0
