@@ -1,14 +1,11 @@
 from enum import Enum
  
-from loguru import logger
- 
-from app.extract.csv import ExtractCSV
-from app.extract.excel import ExtractXLSX
-from app.extract.txt import ExtractText
-from app.extract.txt_converted_from_msg import ExtractTextConvertedFromMSG
-from app.extract.website_trafilatura import ExtractWebsite
-from app.extract.pdf import ExtractPDF
-from app.extract.pdf_converted import ExtractPDFConverted
+from app.load_documents.parsers.csv import ExtractCSV
+from app.load_documents.parsers.excel import ExtractXLSX
+from app.load_documents.parsers.txt import ExtractText
+from app.load_documents.parsers import ExtractTextConvertedFromMSG
+from app.load_documents.parsers.pdf import ExtractPDF
+from app.load_documents.parsers.convert_to_pdf import ExtractPDFConverted
  
  
 class ExtractStrategy(Enum):

@@ -30,7 +30,7 @@ class ExtractXLSX:
                 try:
                     df = xl.parse(sheet_name)
                 except Exception as e:
-                    logging.warning(f"Failed to parse sheet '{sheet_name}' in {source}: {e}")
+                    logging.warning(f"Failed to parse sheet '{sheet_name}' in {file_path}: {e}")
                     continue
                 if df.empty:
                     continue
@@ -69,7 +69,7 @@ class ExtractXLSX:
 
             return all_nodes
         except Exception as e:
-            logging.error(f"Failed to process excel file '{source}': {e}")
+            logging.error(f"Failed to process excel file '{file_path}': {e}")
             return []
         
 if __name__ == "__main__":
