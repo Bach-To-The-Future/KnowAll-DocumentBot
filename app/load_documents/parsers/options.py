@@ -1,24 +1,24 @@
 from enum import Enum
  
+import logging
 from app.load_documents.parsers.csv import ExtractCSV
 from app.load_documents.parsers.excel import ExtractXLSX
 from app.load_documents.parsers.txt import ExtractText
-from app.load_documents.parsers import ExtractTextConvertedFromMSG
 from app.load_documents.parsers.pdf import ExtractPDF
-from app.load_documents.parsers.convert_to_pdf import ExtractPDFConverted
  
- 
+logging.basicConfig(level=logging.INFO)
+
 class ExtractStrategy(Enum):
     PDF = ExtractPDF
     CSV = ExtractCSV
-    DOCX = ExtractPDFConverted
-    DOC = ExtractPDFConverted
+    DOCX = ExtractPDF
+    DOC = ExtractPDF
     XLSX = ExtractXLSX
-    PPTX = ExtractPDFConverted
-    PPT = ExtractPDFConverted
+    PPTX = ExtractPDF
+    PPT = ExtractPDF
     TXT = ExtractText
     MD = ExtractText
-    MSG = ExtractTextConvertedFromMSG
+    MSG = ExtractText
  
     @classmethod
     def get_extractor(cls, file_path: str):
@@ -33,6 +33,6 @@ class ExtractStrategy(Enum):
         """
         from pathlib import Path
  
-        ext = Path(file_path).suffix.lstrip(".").upper()
-        logger.info(f"Extracting file with type {ext}")
+        ext = Path(file_path).suffix.lstrip(".").lower()
+        logging.info(f"Extracting file with type {ext}")
         return cls.__members__.get(ext, None).value if ext in cls.__members__ else None

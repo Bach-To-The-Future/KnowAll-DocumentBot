@@ -6,7 +6,7 @@ from llama_index.core import Document
 from llama_index.core.node_parser import SentenceSplitter
 
 from app.config import Config
-from .helper import generate_metadata
+from .helper import generate_metadata_csv_excel
 
 config = Config()
 logging.basicConfig(level=logging.INFO)
@@ -55,7 +55,7 @@ class ExtractXLSX:
                         logging.warning(f"Could not determine row range: {e}")
                         row_range = "unknown"
                 
-                    metadata = generate_metadata(
+                    metadata = generate_metadata_csv_excel(
                         source=source,
                         index=i,
                         max_index=len(nodes),
