@@ -5,6 +5,7 @@ import csv
 from typing import List
 from llama_index.core import Document
 from llama_index.core.node_parser import SentenceSplitter
+from llama_index.readers.file import CSVReader
 import logging
 import io
 
@@ -86,47 +87,53 @@ class ExtractCSV:
             return []
 
         all_nodes = []
-        for table_id, df in enumerate(tables):
-            if df.empty:
-                continue
+        csv_reader = CSVReader()
+        for table_id, csv_text in enumerate(tables):
+            try:
+                # Read table as a Document using CSVReader
+                documents = csv_reader.load_data(file=csv_text)
+                document = documents[0] if documents else None
+                if document is None or not document.text.strip():
+                    continue
 
-            lines = [f"{i}: {row.to_json(force_ascii=False)}" for i, row in df.iterrows()]
-            document = Document(text="\n".join(lines))
-
-            splitter = SentenceSplitter(
-                chunk_size=config.CHUNK_SIZE,
-                chunk_overlap=config.CHUNK_OVERLAP
-            )
-            nodes = splitter.get_nodes_from_documents([document])
-
-            for i, node in enumerate(nodes):
-                # Extract row range
-                lines_in_chunk = node.text.splitlines()
-                try:
-                    first_idx = int(lines_in_chunk[0].split(":", 1)[0])
-                    last_idx = int(lines_in_chunk[-1].split(":", 1)[0])
-                    row_range = f"{first_idx} - {last_idx}"
-                except Exception as e:
-                    logging.warning(f"Could not determine row range: {e}")
-                    row_range = "unknown"
-                
-                metadata = generate_metadata_csv_excel(
-                    source=source,
-                    index=i,
-                    max_index=len(nodes),
-                    file_format=ext,
-                    sheet_name=None,
-                    table_id=f"table_{table_id}",
-                    headers=df.columns.tolist(),
-                    row_range=row_range
+                splitter = SentenceSplitter(
+                    chunk_size=config.CHUNK_SIZE,
+                    chunk_overlap=config.CHUNK_OVERLAP
                 )
-                node.metadata = metadata
+                nodes = splitter.get_nodes_from_documents([document])
+
+                for i, node in enumerate(nodes):
+                    # Attempt to extract row indices
+                    lines_in_chunk = node.text.splitlines()
+                    try:
+                        first_idx = int(lines_in_chunk[0].split(":", 1)[0])
+                        last_idx = int(lines_in_chunk[-1].split(":", 1)[0])
+                        row_range = f"{first_idx} - {last_idx}"
+                    except Exception as e:
+                        logging.warning(f"Could not determine row range: {e}")
+                        row_range = "unknown"
+
+                    df = pd.read_csv(pd.compat.StringIO(csv_text))  # recreate DataFrame from text
+                    metadata = generate_metadata_csv_excel(
+                        source=source,
+                        index=i,
+                        max_index=len(nodes),
+                        file_format=ext,
+                        sheet_name=None,
+                        table_id=f"table_{table_id}",
+                        headers=df.columns.tolist(),
+                        row_range=row_range
+                    )
+                    node.metadata = metadata
+
                 all_nodes.extend(nodes)
+            except Exception as e:
+                logging.error(f"Failed processing table {table_id}: {e}")
 
         return all_nodes
     
 if __name__ == "__main__":
-    nodes = ExtractCSV.extract_and_chunk("./documents/Khảo sát về hành vi tiêu thụ đồ uống có cồn (Responses) - Form responses 1.csv")
+    nodes = ExtractCSV.extract_and_chunk("./documents/advertising.csv")
     for node in nodes:
         print(node.metadata)
         print(node.text[:150])

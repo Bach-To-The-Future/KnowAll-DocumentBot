@@ -11,4 +11,4 @@ pymupdf==1.26.0
 pdfplumber==0.11.6
 docx2pdf==0.1.8
 pptxtopdf==0.0.2
-textract==1.6.5
+# textract==1.6.5

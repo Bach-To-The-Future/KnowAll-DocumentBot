@@ -2,6 +2,6 @@
 *.env
 *.venv/
 *venv/
-instructions.txt
+*instructions.txt
 *documents/
 *.ipynb

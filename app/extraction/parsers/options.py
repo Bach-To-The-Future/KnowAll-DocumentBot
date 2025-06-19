@@ -1,10 +1,10 @@
 from enum import Enum
  
 import logging
-from app.load_documents.parsers.csv import ExtractCSV
-from app.load_documents.parsers.excel import ExtractXLSX
-from app.load_documents.parsers.txt import ExtractText
-from app.load_documents.parsers.pdf import ExtractPDF
+from app.extraction.parsers.csv import ExtractCSV
+from app.extraction.parsers.excel import ExtractXLSX
+from app.extraction.parsers.txt import ExtractText
+from app.extraction.parsers.pdf import ExtractPDF
  
 logging.basicConfig(level=logging.INFO)
 
