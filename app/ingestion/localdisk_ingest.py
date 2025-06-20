@@ -1,6 +1,7 @@
 import os
 import io
 import json
+import glob
 import logging
 import hashlib
 from typing import Union, List
@@ -173,10 +174,5 @@ if __name__ == "__main__":
     )
 
     connector.list_files()
-    connector.upload_files([
-        "./documents/error.txt",
-        "./documents/PHIẾU ĐÁNH GIÁ THỰC TẬP HUST_DatND48.docx",
-        "./documents/PHIẾU ĐÁNH GIÁ THỰC TẬP HUST_HoangNH155.docx",
-        "./documents/Internship_confirmation_request (1).pdf"
-    ])
+    connector.upload_files(glob.glob("./app/documents/*"))
 

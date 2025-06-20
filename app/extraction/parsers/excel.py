@@ -42,7 +42,7 @@ class ExtractXLSX:
                     chunk_size = config.CHUNK_SIZE,
                     chunk_overlap = config.CHUNK_OVERLAP
                 )
-                nodes = splitter.get_nodes_from_document([document])
+                nodes = splitter.get_nodes_from_documents([document])
 
                 for i, node in enumerate(nodes):
                     # Extract row range
@@ -73,7 +73,7 @@ class ExtractXLSX:
             return []
         
 if __name__ == "__main__":
-    nodes = ExtractXLSX.extract_and_chunk("./documents/test.xlsx")
+    nodes = ExtractXLSX.extract_and_chunk("./app/documents/French Vocabulaire.xlsx")
     for node in nodes:
         print(node.metadata)
         print(node.text[:150])

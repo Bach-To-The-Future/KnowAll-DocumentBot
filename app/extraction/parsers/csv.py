@@ -5,7 +5,6 @@ import csv
 from typing import List
 from llama_index.core import Document
 from llama_index.core.node_parser import SentenceSplitter
-from llama_index.readers.file import CSVReader
 import logging
 import io
 
@@ -87,13 +86,13 @@ class ExtractCSV:
             return []
 
         all_nodes = []
-        csv_reader = CSVReader()
-        for table_id, csv_text in enumerate(tables):
+        for table_id, csv_df in enumerate(tables):
             try:
-                # Read table as a Document using CSVReader
-                documents = csv_reader.load_data(file=csv_text)
-                document = documents[0] if documents else None
-                if document is None or not document.text.strip():
+                # Convert DataFrame to CSV string
+                csv_str = csv_df.to_csv(index=False)
+                # Create a Document object directly
+                document = Document(text=csv_str)
+                if not document.text.strip():
                     continue
 
                 splitter = SentenceSplitter(
@@ -103,7 +102,6 @@ class ExtractCSV:
                 nodes = splitter.get_nodes_from_documents([document])
 
                 for i, node in enumerate(nodes):
-                    # Attempt to extract row indices
                     lines_in_chunk = node.text.splitlines()
                     try:
                         first_idx = int(lines_in_chunk[0].split(":", 1)[0])
@@ -113,7 +111,6 @@ class ExtractCSV:
                         logging.warning(f"Could not determine row range: {e}")
                         row_range = "unknown"
 
-                    df = pd.read_csv(pd.compat.StringIO(csv_text))  # recreate DataFrame from text
                     metadata = generate_metadata_csv_excel(
                         source=source,
                         index=i,
@@ -121,19 +118,19 @@ class ExtractCSV:
                         file_format=ext,
                         sheet_name=None,
                         table_id=f"table_{table_id}",
-                        headers=df.columns.tolist(),
+                        headers=csv_df.columns.tolist(),
                         row_range=row_range
                     )
                     node.metadata = metadata
 
                 all_nodes.extend(nodes)
             except Exception as e:
-                logging.error(f"Failed processing table {table_id}: {e}")
+                logging.error(f"Failed processing table {table_id} in '{file_path}': {e}")
 
         return all_nodes
     
 if __name__ == "__main__":
-    nodes = ExtractCSV.extract_and_chunk("./documents/advertising.csv")
+    nodes = ExtractCSV.extract_and_chunk("./app/documents/advertising.csv")
     for node in nodes:
         print(node.metadata)
         print(node.text[:150])
