@@ -223,7 +223,7 @@ class ExtractPDF:
         return all_nodes
 
 if __name__ == "__main__":
-    nodes = ExtractPDF.extract_and_chunk("./documents/Chapter 02.pptx")
+    nodes = ExtractPDF.extract_and_chunk("./app/documents/ABC DELF junior A2.pdf")
     for node in nodes:
         print(node.metadata)
         print(node.text[:300])

@@ -8,3 +8,5 @@ class Config:
 
     CHUNK_SIZE:int = 800
     CHUNK_OVERLAP:int = 150
+
+    EMBED_MODEL:str = "nomic-embed-text-v1"

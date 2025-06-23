@@ -1,10 +1,9 @@
 import os
 import chardet
-from typing import List, Dict, Union
+from typing import List
 from llama_index.core import Document
 from llama_index.core.node_parser import SentenceSplitter
 import logging
-import textract
 
 from app.config import Config
 from .helper import generate_metadata_txt
@@ -22,51 +21,27 @@ class ExtractTXT:
         if encoding.lower() == "ascii":
             encoding = "utf-8"
         return encoding
-    
-    @staticmethod
-    def convert_to_txt(file_path:str, encoding:str = "utf-8") -> str:
-        '''
-            Convert files to txt if file is currently msg, helm
-            Using textract
-            Return the file path of the converted txt file
-        '''
-        # Convert to txt
-        try:
-            text = textract.process(file_path).decode(encoding, errors="ignore")
-        except Exception as e:
-            logging.error(f"Error converting file '{file_path}' to txt: {e}")
-            raise
 
-        txt_path = os.path.splitext(file_path)[0] + ".txt"
-        with open(txt_path, "w", encoding=encoding) as f:
-            f.write(text)
-
-        logging.info(f"Converted {file_path} to {txt_path}")
-        return txt_path
-    
     @staticmethod
-    def extract_and_chunk(file_path:str) -> List:
-        '''
-            Reads and chunks txt file with metadata
-        '''
+    def extract_and_chunk(file_path: str) -> List:
+        """
+        Reads and chunks .txt/.md file content with metadata.
+        """
         ext = os.path.splitext(file_path)[-1][1:].lower()
-        if ext not in config.TXT_EXTENSIONS_CONVERSION:
-            file_path = ExtractTXT.convert_to_txt(file_path)
-            ext = "txt"
         source = os.path.basename(file_path)
 
         if os.path.getsize(file_path) == 0:
-            logging.warning(f"Skipping empty TXT file: {file_path}")
+            logging.warning(f"Skipping empty file: {file_path}")
             return []
-        
+
         try:
             encoding = ExtractTXT.detect_encoding(file_path)
             with open(file_path, "r", encoding=encoding) as f:
                 text = f.read()
         except Exception as e:
-            logging.error(f"Error reading TXT file '{source}': {e}")
+            logging.error(f"Error reading file '{source}': {e}")
             return []
-        
+
         document = Document(text=text)
         splitter = SentenceSplitter(
             chunk_size=config.CHUNK_SIZE,
@@ -81,15 +56,15 @@ class ExtractTXT:
                 index=i,
                 max_index=len(nodes),
                 file_format=ext,
-                page_num=1 # Default for txt file format
+                page_num=1  # Default just 1
             )
             node.metadata = metadata
             all_nodes.append(node)
-        
+
         return all_nodes
-    
+
 if __name__ == "__main__":
-    nodes = ExtractTXT.extract_and_chunk("./documents/setup_wsl.md")
+    nodes = ExtractTXT.extract_and_chunk("./app/documents/Data quality.txt")
     for node in nodes:
         print(node.metadata)
         print(node.text[:300])
