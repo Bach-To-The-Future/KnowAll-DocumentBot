@@ -10,3 +10,7 @@ class Config:
     CHUNK_OVERLAP:int = 150
 
     EMBED_MODEL:str = "nomic-embed-text-v1"
+
+    QDRANT_HOST:str = "localhost"
+    QDRANT_PORT:int = 6333
+    COLLECTION_NAME:str = "docs_chunks"
