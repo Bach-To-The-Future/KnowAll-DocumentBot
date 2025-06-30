@@ -3,7 +3,7 @@ from enum import Enum
 import logging
 from app.extraction.csv import ExtractCSV
 from app.extraction.excel import ExtractXLSX
-from app.extraction.txt import ExtractText
+from app.extraction.txt import ExtractTXT
 from app.extraction.pdf import ExtractPDF
  
 logging.basicConfig(level=logging.INFO)
@@ -16,9 +16,9 @@ class ExtractStrategy(Enum):
     XLSX = ExtractXLSX
     PPTX = ExtractPDF
     PPT = ExtractPDF
-    TXT = ExtractText
-    MD = ExtractText
-    MSG = ExtractText
+    TXT = ExtractTXT
+    MD = ExtractTXT
+    MSG = ExtractTXT
  
     @classmethod
     def get_extractor(cls, file_path: str):

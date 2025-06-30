@@ -14,3 +14,8 @@ pptxtopdf==0.0.2
 openpyxl==3.1.5
 # textract==1.6.5
 nomic==3.5.3
+qdrant-client==1.14.3
+fastapi==0.115.14
+uvicorn==0.35.0
+streamlit==1.46.1
+python-multipart==0.0.20

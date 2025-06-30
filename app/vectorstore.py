@@ -5,7 +5,7 @@ import uuid
 
 config = Config()
 
-client = QdrantCLient(host=config.QDRANT_HOST, port=config.QDRANT_PORT)
+client = QdrantClient(host=config.QDRANT_HOST, port=config.QDRANT_PORT)
 COLLECTION_NAME = config.COLLECTION_NAME
 
 def ensure_collection():
