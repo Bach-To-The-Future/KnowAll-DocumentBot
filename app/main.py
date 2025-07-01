@@ -1,74 +1,106 @@
 from fastapi import FastAPI, UploadFile, File
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+from typing import List
 from app.ingestion.ingestion_pipeline import process_documents
 from app.query import router as query_router
-import boto3
-import os
-import logging
+from app.vectorstore import upsert_vectors, ensure_collection, delete_vectors_by_source
+import boto3, os, logging
 from dotenv import load_dotenv
 
 load_dotenv()
 
-# Load from env or hardcode for now
-MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT")
+# ENV Configs
+MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT")  # e.g. 127.0.0.1:9000
 ACCESS_KEY = os.getenv("ACCESS_KEY")
 SECRET_KEY = os.getenv("SECRET_KEY")
 BUCKET_NAME = os.getenv("BUCKET_NAME")
 
-# FastAPI app
+# App
 app = FastAPI()
 app.include_router(query_router)
 
+# MinIO client
 s3 = boto3.client(
-        "s3",
-        endpoint_url=f"http://{MINIO_ENDPOINT}",
-        aws_access_key_id=ACCESS_KEY,
-        aws_secret_access_key=SECRET_KEY,
+    "s3",
+    endpoint_url=f"http://{MINIO_ENDPOINT}",
+    aws_access_key_id=ACCESS_KEY,
+    aws_secret_access_key=SECRET_KEY,
 )
 
-# --- OPTIONAL: Keep local upload route for flexibility ---
 @app.post("/upload/")
 async def upload(file: UploadFile = File(...)):
-    os.makedirs("uploaded_docs", exist_ok=True)
-    path = os.path.join("uploaded_docs", file.filename)
-    
-    with open(path, "wb") as f:
-        f.write(await file.read())
-
     try:
-        vectors = process_documents(path)
-        return {"message": f"{len(vectors)} chunks processed and embedded"}
+        object_name = file.filename
+        s3.upload_fileobj(file.file, BUCKET_NAME, object_name)
     except Exception as e:
-        return {"error": str(e)}
+        return {"error": f"❌ Failed to upload to MinIO: {e}"}
 
-# --- ✅ New: Ingest from MinIO ---
+    return await ingest_from_minio(MinIOIngestRequest(bucket=BUCKET_NAME, object_name=object_name))
+
+class DeleteDocumentsRequest(BaseModel):
+    object_names: List[str]
+
+@app.delete("/delete_documents")
+async def delete_documents(payload: DeleteDocumentsRequest):
+    deleted = []
+    errors = []
+
+    for object_name in payload.object_names:
+        try:
+            s3.delete_object(Bucket=BUCKET_NAME, Key=object_name)
+            delete_vectors_by_source(object_name)
+            deleted.append(object_name)
+            logging.info(f"🗑️ Deleted '{object_name}' from MinIO and Qdrant.")
+        except Exception as e:
+            logging.error(f"❌ Failed to delete '{object_name}': {e}")
+            errors.append({"file": object_name, "error": str(e)})
+
+    return {
+        "deleted": deleted,
+        "errors": errors,
+        "message": f"🧹 Deleted {len(deleted)} file(s), {len(errors)} error(s)."
+    }
+
 class MinIOIngestRequest(BaseModel):
     bucket: str
     object_name: str
 
 @app.post("/ingest_from_minio")
 async def ingest_from_minio(req: MinIOIngestRequest):
-    # Download the file locally
     os.makedirs("minio_downloads", exist_ok=True)
     local_path = os.path.join("minio_downloads", req.object_name)
+    ensure_collection()
 
     try:
         s3.download_file(req.bucket, req.object_name, local_path)
     except Exception as e:
-        return {"error": f"Failed to download from MinIO: {str(e)}"}
+        return {"error": f"❌ Failed to download from MinIO: {e}"}
 
     try:
+        print(f"🚀 Starting ingestion for: {local_path}")
         vectors = process_documents(local_path)
-        return {"message": f"{len(vectors)} chunks embedded from '{req.object_name}'"}
+        if not vectors:
+            return {"error": f"⚠️ No vectors extracted from '{req.object_name}'"}
+
+        print(f"🧠 Extracted {len(vectors)} vectors.")
+        upsert_vectors(vectors)
+        return {"message": f"✅ {len(vectors)} chunks embedded from '{req.object_name}'"}
     except Exception as e:
-        return {"error": str(e)}
+        return {"error": f"❌ Failed to process document: {e}"}
+
 
 @app.get("/list_documents")
 async def list_documents():
     try:
         response = s3.list_objects_v2(Bucket=BUCKET_NAME)
-        objects = [item["Key"] for item in response.get("Contents", [])]
+        contents = response.get("Contents", [])
+        if not contents:
+            return {"files": []}  # ✅ Return empty list when bucket is empty
+
+        objects = [item["Key"] for item in contents]
         return {"files": objects}
     except Exception as e:
-        logging.error(f"❌ Error listing files in bucket: {e}")
-        return {"error": str(e)}
+        logging.error(f"❌ Error listing files from MinIO: {e}")
+        return {"error": "❌ Could not list documents from MinIO."}
+

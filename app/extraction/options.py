@@ -5,14 +5,15 @@ from app.extraction.csv import ExtractCSV
 from app.extraction.excel import ExtractXLSX
 from app.extraction.txt import ExtractTXT
 from app.extraction.pdf import ExtractPDF
+from app.extraction.docx_format import ExtractDOCX
  
 logging.basicConfig(level=logging.INFO)
 
 class ExtractStrategy(Enum):
     PDF = ExtractPDF
     CSV = ExtractCSV
-    DOCX = ExtractPDF
-    DOC = ExtractPDF
+    DOCX = ExtractDOCX
+    DOC = ExtractDOCX
     XLSX = ExtractXLSX
     PPTX = ExtractPDF
     PPT = ExtractPDF
@@ -33,6 +34,6 @@ class ExtractStrategy(Enum):
         """
         from pathlib import Path
  
-        ext = Path(file_path).suffix.lstrip(".").lower()
+        ext = Path(file_path).suffix.lstrip(".").upper()
         logging.info(f"Extracting file with type {ext}")
         return cls.__members__.get(ext, None).value if ext in cls.__members__ else None

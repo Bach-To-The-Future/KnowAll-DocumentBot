@@ -6,10 +6,11 @@ class Config:
     PDF_EXTENSIONS_CONVERSION = ("docx", "pptx", "doc", "ppt")
     TXT_EXTENSIONS_CONVERSION = ("md", "msg", "helm")
 
-    CHUNK_SIZE:int = 800
-    CHUNK_OVERLAP:int = 150
+    CHUNK_SIZE:int = 550
+    CHUNK_OVERLAP:int = 100
 
     EMBED_MODEL:str = "nomic-embed-text-v1"
+    LLM_MODEL:str = "llama3.2:1b"
 
     QDRANT_HOST:str = "localhost"
     QDRANT_PORT:int = 6333

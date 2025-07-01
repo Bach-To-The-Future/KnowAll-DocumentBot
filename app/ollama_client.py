@@ -1,8 +1,11 @@
 import requests
+from app.config import Config
+
+config = Config()
 
 OLLAMA_API_URL = "http://localhost:11434/api/generate"
 
-def query_ollama(prompt: str, model: str = "llama3.2:1b", stream: bool = False, system_prompt: str = None) -> str:
+def query_ollama(prompt: str, model: str = config.LLM_MODEL, stream: bool = False, system_prompt: str = None) -> str:
     """
     Send a prompt to the local Ollama server and get the model's response.
     

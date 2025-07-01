@@ -70,6 +70,7 @@ class ExtractCSV:
         Main method to be called by ExtractStrategy.
         Reads and chunks CSV content with metadata.
         """
+        print(f"📂 Extracting and chunking: {file_path}")
         ext = os.path.splitext(file_path)[-1][1:].lower()
         source = os.path.basename(file_path)
 

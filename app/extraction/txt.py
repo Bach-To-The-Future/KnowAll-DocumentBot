@@ -27,6 +27,7 @@ class ExtractTXT:
         """
         Reads and chunks .txt/.md file content with metadata.
         """
+        print(f"📂 Extracting and chunking: {file_path}")
         ext = os.path.splitext(file_path)[-1][1:].lower()
         source = os.path.basename(file_path)
 

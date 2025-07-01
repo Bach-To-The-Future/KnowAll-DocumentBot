@@ -5,8 +5,6 @@ import pandas as pd
 import json
 from typing import List
 import pdfplumber
-import docx2pdf
-import pptxtopdf
 import logging
 from llama_index.core import Document
 from llama_index.core.node_parser import SentenceSplitter
@@ -20,10 +18,8 @@ logging.basicConfig(level=logging.INFO)
 class ExtractPDF:
 
     @staticmethod
-    def extract_text(file_path: str) -> str:
-        '''
-            Extract text from pdf file using PyMuPDF
-        '''
+    def extract_text(file_path: str) -> List[tuple[int, str]]:
+        """Extract plain text from each PDF page using PyMuPDF."""
         page_texts = []
         try:
             with fitz.open(file_path) as doc:
@@ -32,14 +28,12 @@ class ExtractPDF:
                     if text.strip():
                         page_texts.append((page_num, text.strip()))
         except Exception as e:
-            logging.error(f"Text extraction failed: {e}")
+            logging.error(f"[ExtractPDF] Text extraction failed: {e}")
         return page_texts
-    
+
     @staticmethod
-    def extract_tables(file_path:str) -> List[pd.DataFrame]:
-        '''
-            Extract tables from pdf file using pdfPlumber
-        '''
+    def extract_tables(file_path: str) -> List[tuple[pd.DataFrame, int]]:
+        """Extract tables from PDF using pdfplumber, returns (DataFrame, page_number)."""
         tables = []
         try:
             with pdfplumber.open(file_path) as pdf:
@@ -48,18 +42,16 @@ class ExtractPDF:
                     for raw_table in page_tables:
                         df = pd.DataFrame(raw_table)
                         if not df.dropna(how="all").empty:
-                            df.columns = df.iloc[0]  # Use first row as headers
+                            df.columns = df.iloc[0]
                             df = df[1:].reset_index(drop=True)
-                            tables.append((df, page_num)) # Include page number
+                            tables.append((df, page_num))
         except Exception as e:
-            logging.warning(f"Table extraction failed: {e}")
+            logging.warning(f"[ExtractPDF] Table extraction failed: {e}")
         return tables
-    
+
     @staticmethod
-    def detect_figures(file_path:str) -> List[str]:
-        '''
-            Detect figures/images and log their presence
-        '''
+    def detect_figures(file_path: str) -> List[str]:
+        """Detect presence of figures/images in PDF."""
         image_descriptions = []
         try:
             with fitz.open(file_path) as doc:
@@ -68,69 +60,39 @@ class ExtractPDF:
                     if images:
                         image_descriptions.append(f"Page {page_num + 1}: {len(images)} image(s) detected")
         except Exception as e:
-            logging.warning(f"Image detection failed: {e}")
+            logging.warning(f"[ExtractPDF] Image detection failed: {e}")
         return image_descriptions
-    
-    @staticmethod
-    def convert_to_pdf(file_path:str, overwrite:bool = False) -> str:
-        '''
-            Convert files to pdf if the file is currently docx, pptx
-            Return the file path to the converted pdf file
-        '''
-        pdf_path = os.path.splitext(file_path)[0] + ".pdf"
-        dir_name = os.path.dirname(file_path)
-        ext = os.path.splitext(file_path)[-1].lower()
-
-        # Remove existing pdf
-        if os.path.exists(pdf_path):
-            os.remove(pdf_path)
-
-        # Convert docx/pptx to pdf
-        try:
-            if ext == ".docx":
-                docx2pdf.convert(file_path, pdf_path)
-            elif ext == ".pptx":
-                pptxtopdf.convert(file_path, dir_name)
-            else:
-                raise ValueError("Only .docx and .pptx files are supported.")
-        except Exception as e:
-            raise RuntimeError(f"Conversion failed: {e}")
-
-        if not os.path.exists(pdf_path):
-            raise FileNotFoundError("Output pdf not found")
-        return pdf_path
 
     @staticmethod
-    def extract_and_chunk(file_path: str) -> List:
-        ext = os.path.splitext(file_path)[-1][1:].lower()
-
-        # Convert to pdf if file format is not pdf already
-        if ext in config.PDF_EXTENSIONS_CONVERSION:
-            file_path = ExtractPDF.convert_to_pdf(file_path)
-            ext = "pdf"
-        source = os.path.basename(file_path)
-
-        if os.path.getsize(file_path) == 0:
-            logging.warning(f"Skipping empty PDF file: {file_path}")
+    def extract_and_chunk(file_path: str) -> List[Document]:
+        print(f"📂 Extracting and chunking: {file_path}")
+        if not os.path.exists(file_path):
+            logging.error(f"[ExtractPDF] File not found: {file_path}")
             return []
 
-        # Extract all content types
+        if os.path.getsize(file_path) == 0:
+            logging.warning(f"[ExtractPDF] Skipping empty file: {file_path}")
+            return []
+
+        source = os.path.basename(file_path)
+        ext = "pdf"  # Force format tag since this extractor is PDF-specific
+
         page_texts = ExtractPDF.extract_text(file_path)
         tables = ExtractPDF.extract_tables(file_path)
         figures = ExtractPDF.detect_figures(file_path)
 
         all_nodes = []
+        splitter = SentenceSplitter(
+            chunk_size=config.CHUNK_SIZE,
+            chunk_overlap=config.CHUNK_OVERLAP
+        )
 
         # Chunk plain text
         for page_num, page_text in page_texts:
             document = Document(text=page_text)
-            splitter = SentenceSplitter(
-                chunk_size=config.CHUNK_SIZE,
-                chunk_overlap=config.CHUNK_OVERLAP
-            )
             nodes = splitter.get_nodes_from_documents([document])
             for i, node in enumerate(nodes):
-                metadata = generate_metadata_pdf(
+                node.metadata = generate_metadata_pdf(
                     source=source,
                     index=i,
                     max_index=len(nodes),
@@ -139,91 +101,61 @@ class ExtractPDF:
                     headers=None,
                     row_range="text"
                 )
-                node.metadata = metadata
                 all_nodes.append(node)
 
-        # Chunk extracted tables
+        # Chunk tables
         for table_id, (df, page_num) in enumerate(tables):
             if df.empty:
                 continue
-            # Drop completely empty columns
+
             df = df.dropna(how='all', axis=1)
-            # Use first row as header
             df.columns = df.iloc[0].fillna("").astype(str)
-            # Deduplicate column names manually
-            def deduplicate_columns(columns):
-                seen = {}
-                new_columns = []
-                for col in columns:
-                    if col not in seen:
-                        seen[col] = 0
-                        new_columns.append(col)
-                    else:
-                        seen[col] += 1
-                        new_columns.append(f"{col}_{seen[col]}")
-                return new_columns
+            df = df[1:].reset_index(drop=True)
 
-            # Header detection
-            if df.iloc[0].dropna().nunique() < df.shape[1] // 2:
-                df.columns = [f"col_{i}" for i in range(df.shape[1])]
-            else:
-                df.columns = df.iloc[0].fillna("").astype(str)
-                df = df[1:]
-            df = df.reset_index(drop=True)
-
-            # Safely convert each row to JSON
             lines = []
             for i, row in df.iterrows():
-                row_dict = {df.columns[j]: val for j, val in enumerate(row.values)}
+                row_dict = {col: val for col, val in zip(df.columns, row.values)}
                 lines.append(f"{i}: {json.dumps(row_dict, ensure_ascii=False)}")
 
             document = Document(text="\n".join(lines))
-            splitter = SentenceSplitter(
-                chunk_size=config.CHUNK_SIZE,
-                chunk_overlap=config.CHUNK_OVERLAP
-            )
             nodes = splitter.get_nodes_from_documents([document])
             for i, node in enumerate(nodes):
                 row_range = f"{i * config.CHUNK_SIZE} - {(i + 1) * config.CHUNK_SIZE}"
-                metadata = generate_metadata_pdf(
+                node.metadata = generate_metadata_pdf(
                     source=source,
                     index=i,
                     max_index=len(nodes),
                     file_format=ext,
-                    sheet_name=None,
-                    table_id=f"table_{table_id}",
+                    page_num=page_num,
                     headers=df.columns.tolist(),
                     row_range=row_range,
-                    page_num=page_num  # Include page number
+                    table_id=f"table_{table_id}"
                 )
-                node.metadata = metadata
                 all_nodes.append(node)
 
-        # Add figure placeholders
+        # Chunk figure/image descriptions
         for i, desc in enumerate(figures):
             document = Document(text=desc)
-
-            # Extract page_num from string - "Page 5: 2 image(s) detected"
             match = re.search(r"Page\s+(\d+)", desc)
-            page_num = int(match.group(1)) if match else -1  # Default to -1 if not found
+            page_num = int(match.group(1)) if match else -1
 
-            metadata = generate_metadata_pdf(
+            document.metadata = generate_metadata_pdf(
                 source=source,
                 index=i,
                 max_index=len(figures),
                 file_format=ext,
-                page_num=page_num, 
-                table_id=f"figure_{i}",
+                page_num=page_num,
                 headers=None,
-                row_range="image_detected"
+                row_range="image_detected",
+                table_id=f"figure_{i}"
             )
-            document.metadata = metadata
             all_nodes.append(document)
 
         return all_nodes
 
+# --- Optional test run ---
 if __name__ == "__main__":
-    nodes = ExtractPDF.extract_and_chunk("./app/documents/ABC DELF junior A2.pdf")
+    nodes = ExtractPDF.extract_and_chunk("./app/documents/sample.pdf")
     for node in nodes:
         print(node.metadata)
         print(node.text[:300])
