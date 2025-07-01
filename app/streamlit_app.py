@@ -262,14 +262,23 @@ with tab3:
 
                     citations = result.get("citations", [])
                     if citations:
-                        st.markdown("### 📄 References")
-                        for ref in citations:
-                            index = ref.get("index", "?")
-                            source = os.path.basename(ref.get("source", "unknown"))
-                            page = ref.get("page_number", "?")
-                            snippet = ref.get("text", "")
-                            st.markdown(f"**[{index}] Page {page} — {source}**")
-                            st.markdown(snippet)
+                        # Only show references from selected docs!
+                        valid_sources = set(os.path.basename(f) for f in st.session_state.selected_docs)
+                        filtered_citations = [
+                            ref for ref in citations
+                            if os.path.basename(ref.get("source", "")) in valid_sources
+                        ]
+                        if filtered_citations:
+                            st.markdown("### 📄 References")
+                            for ref in filtered_citations:
+                                index = ref.get("index", "?")
+                                source = os.path.basename(ref.get("source", "unknown"))
+                                page = ref.get("page_number", "?")
+                                snippet = ref.get("text", "")
+                                st.markdown(f"**[{index}] Page {page} — {source}**")
+                                st.markdown(snippet)
+                        else:
+                            st.info("ℹ️ No references returned from selected documents.")
                     else:
                         st.info("ℹ️ No references returned.")
                 else:

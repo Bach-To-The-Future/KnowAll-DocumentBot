@@ -1,0 +1,4 @@
+Data quality
+Volume size - record count
+quality - sampling based on some key ids
+	- hash on incremental load
