@@ -5,7 +5,7 @@ from llama_index.core import Document
 from llama_index.core.node_parser import SentenceSplitter
 import logging
 
-from app.config import Config
+from config import Config
 from .helper import generate_metadata_txt
 
 config = Config()

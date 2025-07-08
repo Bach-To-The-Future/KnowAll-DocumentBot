@@ -5,7 +5,6 @@ import glob
 import logging
 import hashlib
 from typing import Union, List
-from dotenv import load_dotenv
 from minio import Minio
 from minio.error import S3Error
 import boto3
@@ -16,14 +15,12 @@ from app.config import Config
 
 config = Config()
 mongo_meta = Mongo_meta()
-load_dotenv()
 logging.basicConfig(level=logging.INFO)
 
-ENDPOINT = os.getenv("MINIO_ENDPOINT")
-ACCESS_KEY = os.getenv("ACCESS_KEY")
-SECRET_KEY = os.getenv("SECRET_KEY")
-BUCKET_NAME = os.getenv("BUCKET_NAME")
-
+ENDPOINT = config.MINIO_ENDPOINT
+ACCESS_KEY = config.MINIO_ACCESS_KEY
+SECRET_KEY = config.MINIO_SECRET_KEY
+BUCKET_NAME = config.MINIO_BUCKET
 
 class Minio_localdisk:
     def __init__(self, endpoint:str, access_key:str, secret_key:str, bucket_name:str, use_ssl:bool=False):

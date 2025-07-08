@@ -1,6 +1,6 @@
-from app.extraction.options import ExtractStrategy
-from app.embedding import embed_nodes
-from app.vectorstore import upsert_vectors
+from extraction.options import ExtractStrategy
+from embedding.embed import embed_nodes
+from embedding.vectorstore import upsert_vectors
 
 def process_documents(file_path: str):
     extractor_cls = ExtractStrategy.get_extractor(file_path)

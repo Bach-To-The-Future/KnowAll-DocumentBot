@@ -2,25 +2,22 @@ import os
 import io
 import logging
 import pandas as pd
-from dotenv import load_dotenv
 from minio import Minio
 from minio.error import S3Error
 import boto3
 from botocore.exceptions import ClientError
 from hdfs import InsecureClient
 
-from mongo_meta_ingest import Mongo_meta
+from config import Config
+from .mongo_meta_ingest import Mongo_meta
 
-load_dotenv()
 logging.basicConfig(level=logging.INFO)
+config = Config()
 
-ENDPOINT = os.getenv("MINIO_ENDPOINT")
-ACCESS_KEY = os.getenv("ACCESS_KEY")
-SECRET_KEY = os.getenv("SECRET_KEY")
-BUCKET_NAME = os.getenv("BUCKET_NAME")
-HDFS_URL = os.getenv("HDFS_URL")
-HDFS_USER = os.getenv("HDFS_USER")
-HDFS_MINIO_METADATA = os.getenv("HDFS_MINIO_METADATA")
+ENDPOINT = config.MINIO_ENDPOINT
+ACCESS_KEY = config.MINIO_ACCESS_KEY
+SECRET_KEY = config.MINIO_SECRET_KEY
+BUCKET_NAME = config.MINIO_BUCKET
 
 class MinIO_HDFS_Ingest:
     def __init__(self, hdfs_url:str, hdfs_metadata:str, minio_config):
