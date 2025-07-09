@@ -2,15 +2,14 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-COPY requirements.txt .
-
+COPY app/api/requirements.txt ./api/
 RUN pip install --upgrade pip
-RUN pip install --no-cache-dir --timeout=120 -r requirements.txt
+RUN pip install --no-cache-dir --timeout=120 -r api/requirements.txt
 
-COPY ../../ ./
+COPY app/ .
 
 ENV PYTHONPATH=/app
 
 EXPOSE 8000
 
-CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]

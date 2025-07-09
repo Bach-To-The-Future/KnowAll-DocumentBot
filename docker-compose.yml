@@ -47,12 +47,10 @@ services:
   # --- FastAPI Backend ---
   api:
     build:
-      context: ./app/api
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: app/api/Dockerfile
     container_name: knowall-api
-    # command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
-    volumes:
-      - ./app:/app
+    command: uvicorn api.main:app --host 0.0.0.0 --port 8000
     env_file:
       - ./.env
     ports:
@@ -61,18 +59,21 @@ services:
       - minio
       - qdrant
       - ollama
+    # healthcheck:
+    #   test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+    #   interval: 10s
+    #   timeout: 5s
+    #   retries: 3
     networks:
       - knowall-bot
 
   # --- Streamlit Frontend ---
   streamlit:
     build:
-      context: ./app/streamlit
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: app/streamlit_ui/Dockerfile
     container_name: knowall-ui
-    # command: streamlit run /app/streamlit/streamlit_app.py --server.port=8501 --server.address=0.0.0.0
-    volumes:
-      - ./app:/app
+    command: streamlit run streamlit_ui/streamlit_app.py --server.port=8501 --server.address=0.0.0.0
     env_file:
       - ./.env
     ports:

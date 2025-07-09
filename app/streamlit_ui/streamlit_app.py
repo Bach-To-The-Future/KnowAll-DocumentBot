@@ -4,7 +4,7 @@ import requests
 import io, os
 import textwrap
 
-from app.config import Config
+from config import Config
 
 config = Config()
 

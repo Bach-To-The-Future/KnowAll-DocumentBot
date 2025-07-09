@@ -5,27 +5,32 @@ import warnings
 from config import Config
 
 config = Config()
-
 OLLAMA_EMBEDDING_URL = f"{config.OLLAMA_API_URL}embeddings"
-EMBED_MODEL = config.EMBED_MODEL  
+EMBED_MODEL = config.EMBED_MODEL
 
 def get_ollama_embeddings(texts: List[str], model: str) -> List[List[float]]:
-    try:
-        response = requests.post(
-            OLLAMA_EMBEDDING_URL,
-            json={"model": model, "prompt": texts}
-        )
-        response.raise_for_status()
-        data = response.json()
-        # Ollama returns {"embeddings": [embedding1, embedding2, ...]}
-        return data.get("embeddings", [])
-    except Exception as e:
-        raise RuntimeError(f"❌ Failed to fetch embeddings from Ollama: {e}")
+    embeddings = []
+    for text in texts:
+        try:
+            response = requests.post(
+                OLLAMA_EMBEDDING_URL,
+                json={"model": model, "prompt": text},
+                timeout=10
+            )
+            response.raise_for_status()
+            data = response.json()
+            embedding = data.get("embedding")  # Single embedding
+            if embedding is None:
+                warnings.warn(f"❌ No embedding returned for text: {text[:30]!r}")
+                continue
+            embeddings.append(embedding)
+        except Exception as e:
+            warnings.warn(f"❌ Failed to fetch embedding for text: {text[:30]!r}, error: {e}")
+    if not embeddings:
+        raise RuntimeError("❌ Embedding failed for all chunks")
+    return embeddings
 
 def embed_nodes(nodes: List[Any]) -> List[Dict[str, Any]]:
-    """
-    Given a list of nodes (each with .text and .metadata), get embeddings using Ollama.
-    """
     if not nodes or not all(hasattr(n, "text") for n in nodes):
         raise ValueError("Each node must have a 'text' attribute.")
 
@@ -49,7 +54,7 @@ def embed_nodes(nodes: List[Any]) -> List[Dict[str, Any]]:
     for node, emb in zip(filtered_nodes, embeddings):
         if emb is not None:
             results.append({
-                "embedding": emb,  # Already a list
+                "embedding": emb,
                 "text": node.text,
                 "metadata": node.metadata
             })

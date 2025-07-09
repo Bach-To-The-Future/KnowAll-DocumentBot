@@ -12,7 +12,7 @@ class Config:
     CHUNK_SIZE:int = 550
     CHUNK_OVERLAP:int = 100
 
-    EMBED_MODEL:str = "nomic-embed-text-v1.5"
+    EMBED_MODEL:str = "nomic-embed-text"
     # EMBED_API_KEY:str = os.getenv("NOMIC_API_KEY")
     EMBED_DIM:int = 768
     LLM_MODEL:str = "llama3.2:1b"
