@@ -1,12 +1,17 @@
+import os
 from enum import Enum
- 
 import logging
+from pathlib import Path
+from extraction.base import BaseExtractor
 from extraction.csv import ExtractCSV
 from extraction.excel import ExtractXLSX
 from extraction.txt import ExtractTXT
 from extraction.pdf import ExtractPDF
 from extraction.docx_format import ExtractDOCX
- 
+from extraction.pptx import ExtractPPTX
+from extraction.msg import ExtractMSG
+from extraction.helm import ExtractHELM
+
 logging.basicConfig(level=logging.INFO)
 
 class ExtractStrategy(Enum):
@@ -15,25 +20,20 @@ class ExtractStrategy(Enum):
     DOCX = ExtractDOCX
     DOC = ExtractDOCX
     XLSX = ExtractXLSX
-    PPTX = ExtractPDF
-    PPT = ExtractPDF
+    PPTX = ExtractPPTX
+    PPT = ExtractPPTX
     TXT = ExtractTXT
     MD = ExtractTXT
-    MSG = ExtractTXT
- 
+    MSG = ExtractMSG
+    HELM = ExtractHELM
+
     @classmethod
-    def get_extractor(cls, file_path: str):
-        """
-        Determines the appropriate extraction class based on file extension.
- 
-        Args:
-            file_path (str): The file path or URL.
- 
-        Returns:
-            Extractor class if found, otherwise None.
-        """
-        from pathlib import Path
- 
+    def get_extractor(cls, file_path: str) -> BaseExtractor:
+        """Get the appropriate extractor based on file extension."""
         ext = Path(file_path).suffix.lstrip(".").upper()
         logging.info(f"Extracting file with type {ext}")
-        return cls.__members__.get(ext, None).value if ext in cls.__members__ else None
+        extractor_cls = cls.__members__.get(ext, None)
+        if not extractor_cls:
+            logging.error(f"No extractor found for extension: {ext}")
+            return None
+        return extractor_cls.value()

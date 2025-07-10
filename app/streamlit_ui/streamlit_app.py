@@ -90,22 +90,24 @@ def upload_and_embed_to_minio(uploaded_file):
 
     if res:
         res_json = res.json()
-        # Try multiple keys for embedded count
-        embedded_count = (
-            res_json.get("chunks_embedded")
-            or res_json.get("num_chunks")
-            or 0
-        )
+        # Check for error message
+        error_message = res_json.get("error")
+        if error_message:
+            st.warning(f"❗ Backend message: {error_message}")
+            return
 
-        # Check for explicit error message from backend
-        error_message = res_json.get("error") or res_json.get("message", "")
+        # Extract embedded count from message (e.g., "✅ 23 chunks embedded from 'file.docx'")
+        import re
+        message = res_json.get("message", "")
+        match = re.search(r"(\d+) chunks embedded", message)
+        embedded_count = int(match.group(1)) if match else 0
 
         if embedded_count == 0:
             st.warning(f"⚠️ No chunks were embedded from `{object_name}`. Skipped indexing.")
-            if error_message:
-                st.warning(f"❗ Backend message: {error_message}")
+            if message:
+                st.warning(f"❗ Backend message: {message}")
         else:
-            st.success(res_json.get("message", f"✅ File embedded successfully with {embedded_count} chunks."))
+            st.success(f"✅ File embedded successfully with {embedded_count} chunks.")
             st.session_state.uploaded_files.add(object_name)
             st.cache_data.clear()
     else:
@@ -273,7 +275,7 @@ with tab3:
         elif not st.session_state.selected_docs:
             st.warning("⚠️ Please select at least one document.")
         else:
-            st.write("📡 Querying...")
+            st.spinner("📡 Querying...")
             try:
                 response = safe_api_call(
                     requests.post,
