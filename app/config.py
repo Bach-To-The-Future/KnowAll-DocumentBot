@@ -1,6 +1,14 @@
 from dataclasses import dataclass
-import torch
 import os
+import subprocess
+
+def has_nvidia_gpu():
+    """Check for NVIDIA GPU using nvidia-smi."""
+    try:
+        subprocess.check_output(['nvidia-smi'], stderr=subprocess.STDOUT)
+        return 'gpu'
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return 'cpu'
 
 @dataclass(frozen=True)
 class Config:
@@ -8,7 +16,7 @@ class Config:
     PDF_EXTENSIONS_CONVERSION = ("docx", "pptx", "doc", "ppt")
     TXT_EXTENSIONS_CONVERSION = ("md", "msg", "helm")
 
-    DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    DEVICE = has_nvidia_gpu()
     CHUNK_SIZE:int = 550
     CHUNK_OVERLAP:int = 100
 

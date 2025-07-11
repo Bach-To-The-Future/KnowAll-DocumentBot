@@ -275,46 +275,86 @@ with tab3:
         elif not st.session_state.selected_docs:
             st.warning("⚠️ Please select at least one document.")
         else:
-            st.spinner("📡 Querying...")
-            try:
-                response = safe_api_call(
-                    requests.post,
-                    f"{API_BASE_URL}/query",
-                    json={
-                        "question": question,
-                        "documents": list(st.session_state.selected_docs)
-                    }
-                )
-                if response:
-                    result = response.json()
-                    st.markdown("### 🧠 Answer")
-                    st.write(result.get("answer_with_refs", "No answer returned."))
+            # Create a placeholder for the spinner and results
+            placeholder = st.empty()
+            with placeholder.container():
+                with st.spinner("📡 Querying..."):
+                    try:
+                        response = safe_api_call(
+                            requests.post,
+                            f"{API_BASE_URL}/query",
+                            json={
+                                "question": question,
+                                "documents": list(st.session_state.selected_docs)
+                            }
+                        )
+                        # Clear spinner and display results
+                        placeholder.empty()
+                        with placeholder.container():
+                            if response:
+                                result = response.json()
+                                st.markdown("### 🧠 Answer")
+                                st.write(result.get("answer_with_refs", "No answer returned."))
 
-                    citations = result.get("citations", [])
-                    if citations:
-                        # Only show references from selected docs!
-                        valid_sources = set(os.path.basename(f) for f in st.session_state.selected_docs)
-                        filtered_citations = [
-                            ref for ref in citations
-                            if os.path.basename(ref.get("source", "")) in valid_sources
-                        ]
-                        if filtered_citations:
-                            st.markdown("### 📄 References")
-                            for ref in filtered_citations:
-                                index = ref.get("index", "?")
-                                source = os.path.basename(ref.get("source", "unknown"))
-                                page = ref.get("page_number", "?")
-                                snippet = ref.get("text", "")
-                                st.markdown(f"**[{index}] Page {page} — {source}**")
-                                st.markdown(snippet)
-                        else:
-                            st.info("ℹ️ No references returned from selected documents.")
-                    else:
-                        st.info("ℹ️ No references returned.")
-                else:
-                    st.error("❌ Query failed due to network error.")
-            except Exception as e:
-                st.error(f"❌ Exception during query: {e}")
+                                citations = result.get("citations", [])
+                                if citations:
+                                    # Only show references from selected docs
+                                    valid_sources = set(os.path.basename(f) for f in st.session_state.selected_docs)
+                                    filtered_citations = [
+                                        ref for ref in citations
+                                        if os.path.basename(ref.get("source", "")) in valid_sources
+                                    ]
+                                    if filtered_citations:
+                                        st.markdown("### 📄 References")
+                                        for ref in filtered_citations:
+                                            index = ref.get("index", "?")
+                                            source = os.path.basename(ref.get("source", "unknown"))
+                                            page = ref.get("page_number", "?")
+                                            snippet = format_reference_text(ref.get("text", ""))
+                                            st.markdown(f"**[{index}] Page {page} — {source}**")
+                                            st.markdown(f"**Chunk Preview:** {snippet}")
+
+                                            # Fetch and display full document content
+                                            with st.expander(f"📖 View Full Document: {source}", expanded=False):
+                                                # Check cache first
+                                                if source in st.session_state.cached_doc_content:
+                                                    doc_content = st.session_state.cached_doc_content[source]
+                                                else:
+                                                    doc_response = safe_api_call(
+                                                        requests.get,
+                                                        f"{API_BASE_URL}/get_document",
+                                                        params={"object_name": source}
+                                                    )
+                                                    if doc_response:
+                                                        doc_content = doc_response.json().get("content", "")
+                                                        st.session_state.cached_doc_content[source] = doc_content
+                                                    else:
+                                                        st.error("❌ Failed to fetch document content.")
+                                                        continue
+
+                                                if doc_content:
+                                                    if source.endswith(('.csv', '.xlsx')):
+                                                        try:
+                                                            df = pd.read_csv(io.StringIO(doc_content)) if source.endswith('.csv') else pd.read_excel(io.BytesIO(doc_content.encode('utf-8')))
+                                                            st.markdown("**Table Data:**")
+                                                            st.dataframe(df)  # Display full dataframe
+                                                        except Exception as e:
+                                                            st.error(f"❌ Failed to parse table data: {e}")
+                                                    else:
+                                                        st.markdown("**Text Content:**")
+                                                        st.text_area("", doc_content, height=600)  # Increased height
+                                                else:
+                                                    st.error(doc_response.json().get("error", "No content returned"))
+                                    else:
+                                        st.info("ℹ️ No references returned from selected documents.")
+                                else:
+                                    st.info("ℹ️ No references returned.")
+                            else:
+                                st.error("❌ Query failed due to network error.")
+                    except Exception as e:
+                        placeholder.empty()
+                        with placeholder.container():
+                            st.error(f"❌ Exception during query: {e}")
 
 # --- Optionally, add a sidebar for global cache clear ---
 # with st.sidebar:
