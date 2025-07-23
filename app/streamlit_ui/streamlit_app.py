@@ -3,7 +3,7 @@ from minio import Minio
 import requests
 import io, os
 import textwrap
-
+import pandas as pd
 from config import Config
 
 config = Config()
@@ -28,6 +28,8 @@ st.title("🧠 Know-All Chatbot")
 # --- Session State Initialization ---
 st.session_state.setdefault("uploaded_files", set())
 st.session_state.setdefault("selected_docs", set())
+st.session_state.setdefault("cached_doc_content", {})
+st.session_state.setdefault("model_source", "Ollama (local)")
 
 # --- Helper Functions ---
 def safe_api_call(request_func, *args, **kwargs):
@@ -96,7 +98,7 @@ def upload_and_embed_to_minio(uploaded_file):
             st.warning(f"❗ Backend message: {error_message}")
             return
 
-        # Extract embedded count from message (e.g., "✅ 23 chunks embedded from 'file.docx'")
+        # Extract embedded count from message
         import re
         message = res_json.get("message", "")
         match = re.search(r"(\d+) chunks embedded", message)
@@ -113,13 +115,32 @@ def upload_and_embed_to_minio(uploaded_file):
     else:
         st.error("❌ Failed to embed file.")
 
-
 def format_reference_text(text, max_width=100):
     wrapped = textwrap.fill(text, width=max_width)
     return wrapped.replace("\n", "\n\n")
 
 def clear_doc_list_cache():
     fetch_document_list.clear()
+
+# --- Sidebar for Model Selection ---
+with st.sidebar:
+    st.header("⚙️ Model Settings")
+    model_source = st.selectbox(
+        "Select Model Source",
+        ["Ollama (local)", "OpenAI (API)"],
+        index=0 if st.session_state.model_source == "Ollama (local)" else 1,
+        help="Choose between Ollama or OpenAI models for LLM and embeddings."
+    )
+    st.session_state.model_source = model_source
+    if model_source == "OpenAI (API)" and not config.OPENAI_API_KEY:
+        st.warning("⚠️ OpenAI API key not set in .env. Please configure OPENAI_API_KEY.")
+
+    if st.button("🔁 Clear Cache"):
+        clear_doc_list_cache()
+        st.session_state.uploaded_files.clear()
+        st.session_state.selected_docs.clear()
+        st.session_state.cached_doc_content.clear()
+        st.success("✅ Cache and selections cleared.")
 
 # --- UI Tabs ---
 tab1, tab2, tab3 = st.tabs(["📤 Upload & Embed", "🗂️ Select Documents", "💬 Ask a Question"])
@@ -144,7 +165,6 @@ with tab1:
 
 # --- Select Documents Tab ---
 with tab2:
-    # ----- Handle page selection state updates after deletion -----
     if st.session_state.get("_refresh_page_keys"):
         deleted_files = st.session_state.get("_deleted_files", [])
         for key in list(st.session_state.keys()):
@@ -153,7 +173,6 @@ with tab2:
         st.session_state._refresh_page_keys = False
         st.session_state._deleted_files = []
 
-    # --- Handle confirm checkbox reset key
     if "_delete_confirm_counter" not in st.session_state:
         st.session_state._delete_confirm_counter = 0
 
@@ -176,7 +195,6 @@ with tab2:
             select_all_flag = f"{page_key}_select_all"
             deselect_all_flag = f"{page_key}_deselect_all"
 
-            # Handle select/deselect BEFORE multiselect
             if select_all_flag in st.session_state and st.session_state[select_all_flag]:
                 st.session_state[page_key] = current_page_files.copy()
                 st.session_state.selected_docs.update(current_page_files)
@@ -188,7 +206,6 @@ with tab2:
             elif page_key not in st.session_state:
                 st.session_state[page_key] = [f for f in current_page_files if f in st.session_state.selected_docs]
 
-            # --- Multiselect ---
             selected = st.multiselect(
                 "Choose documents (selection persists across pages):",
                 options=current_page_files,
@@ -198,7 +215,6 @@ with tab2:
             st.session_state.selected_docs.difference_update(current_page_files)
             st.session_state.selected_docs.update(selected)
 
-            # --- Selection Buttons ---
             col1, col2, col3 = st.columns([1, 1, 2])
 
             with col1:
@@ -223,16 +239,13 @@ with tab2:
 
             st.info(f"📚 Total selected: {len(st.session_state.selected_docs)}")
 
-            # --- Delete Selected (Robust Handling) ---
             if st.session_state.selected_docs:
                 delete_col, confirm_col = st.columns([2, 3])
                 with delete_col:
                     delete_clicked = st.button("🗑️ Delete Selected Documents")
                 with confirm_col:
-                    # The key includes a counter so it resets on each successful deletion
                     confirm_key = f"confirm_delete_checkbox_{st.session_state._delete_confirm_counter}"
                     confirm_delete = st.checkbox("Confirm deletion", key=confirm_key)
-
                 if delete_clicked:
                     if not confirm_delete:
                         st.warning("⚠️ Please check 'Confirm deletion' before deleting.")
@@ -248,11 +261,10 @@ with tab2:
                                     deleted_files = res.json().get("deleted", [])
                                     errors = res.json().get("errors", [])
 
-                                    # Set flags for rerun and selection update
                                     st.session_state.selected_docs.difference_update(deleted_files)
                                     st.session_state._deleted_files = deleted_files
                                     st.session_state._refresh_page_keys = True
-                                    st.session_state._delete_confirm_counter += 1  # Checkbox will reset
+                                    st.session_state._delete_confirm_counter += 1
                                     st.cache_data.clear()
                                     if deleted_files:
                                         st.success(f"✅ Deleted {len(deleted_files)} file(s): {', '.join(deleted_files)}")
@@ -274,8 +286,9 @@ with tab3:
             st.warning("⚠️ Please enter a question.")
         elif not st.session_state.selected_docs:
             st.warning("⚠️ Please select at least one document.")
+        elif st.session_state.model_source == "openai" and not config.OPENAI_API_KEY:
+            st.error("❌ OpenAI API key not set. Please configure OPENAI_API_KEY in .env or switch to local model.")
         else:
-            # Create a placeholder for the spinner and results
             placeholder = st.empty()
             with placeholder.container():
                 with st.spinner("📡 Querying..."):
@@ -288,7 +301,6 @@ with tab3:
                                 "documents": list(st.session_state.selected_docs)
                             }
                         )
-                        # Clear spinner and display results
                         placeholder.empty()
                         with placeholder.container():
                             if response:
@@ -298,7 +310,6 @@ with tab3:
 
                                 citations = result.get("citations", [])
                                 if citations:
-                                    # Only show references from selected docs
                                     valid_sources = set(os.path.basename(f) for f in st.session_state.selected_docs)
                                     filtered_citations = [
                                         ref for ref in citations
@@ -313,38 +324,6 @@ with tab3:
                                             snippet = format_reference_text(ref.get("text", ""))
                                             st.markdown(f"**[{index}] Page {page} — {source}**")
                                             st.markdown(f"**Chunk Preview:** {snippet}")
-
-                                            # Fetch and display full document content
-                                            with st.expander(f"📖 View Full Document: {source}", expanded=False):
-                                                # Check cache first
-                                                if source in st.session_state.cached_doc_content:
-                                                    doc_content = st.session_state.cached_doc_content[source]
-                                                else:
-                                                    doc_response = safe_api_call(
-                                                        requests.get,
-                                                        f"{API_BASE_URL}/get_document",
-                                                        params={"object_name": source}
-                                                    )
-                                                    if doc_response:
-                                                        doc_content = doc_response.json().get("content", "")
-                                                        st.session_state.cached_doc_content[source] = doc_content
-                                                    else:
-                                                        st.error("❌ Failed to fetch document content.")
-                                                        continue
-
-                                                if doc_content:
-                                                    if source.endswith(('.csv', '.xlsx')):
-                                                        try:
-                                                            df = pd.read_csv(io.StringIO(doc_content)) if source.endswith('.csv') else pd.read_excel(io.BytesIO(doc_content.encode('utf-8')))
-                                                            st.markdown("**Table Data:**")
-                                                            st.dataframe(df)  # Display full dataframe
-                                                        except Exception as e:
-                                                            st.error(f"❌ Failed to parse table data: {e}")
-                                                    else:
-                                                        st.markdown("**Text Content:**")
-                                                        st.text_area("", doc_content, height=600)  # Increased height
-                                                else:
-                                                    st.error(doc_response.json().get("error", "No content returned"))
                                     else:
                                         st.info("ℹ️ No references returned from selected documents.")
                                 else:
@@ -355,11 +334,3 @@ with tab3:
                         placeholder.empty()
                         with placeholder.container():
                             st.error(f"❌ Exception during query: {e}")
-
-# --- Optionally, add a sidebar for global cache clear ---
-# with st.sidebar:
-#     if st.button("🔁 Clear Cache"):
-#         clear_doc_list_cache()
-#         st.session_state.uploaded_files.clear()
-#         st.session_state.selected_docs.clear()
-#         st.success("✅ Cache and selections cleared.")
