@@ -29,6 +29,7 @@ python-multipart==0.0.20
 
 # Embedding
 nomic==3.5.3
+openai==1.97.1
 
 # Optional utility
 chardet==3.0.4

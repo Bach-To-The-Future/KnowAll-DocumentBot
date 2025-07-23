@@ -1,10 +1,13 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from nomic import embed
 from embedding.vectorstore import search_similar
-from llm.ollama_client import query_ollama
-from embedding.embed import get_ollama_embeddings
+from llm.ollama_client import query_llm
+from embedding.embed import get_embeddings
 from config import Config
+import logging
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 config = Config()
 router = APIRouter()
@@ -12,19 +15,19 @@ router = APIRouter()
 EMBED_MODEL = config.EMBED_MODEL
 LLM_MODEL = config.LLM_MODEL
 
-# --- ✅ Request Schema ---
+# --- Request Schema ---
 class QueryRequest(BaseModel):
     question: str
     documents: list[str] | None = None  # Optional filter by filenames
 
-# --- ✅ Response Schema (optional, for stricter typing) ---
+# --- Response Schema ---
 class Citation(BaseModel):
     index: int
     text: str
     source: str
     page_number: str | int
 
-# --- ✅ Query Endpoint ---
+# --- Query Endpoint ---
 @router.post("/query")
 def ask_question(req: QueryRequest):
     if not req.question.strip():
@@ -32,14 +35,16 @@ def ask_question(req: QueryRequest):
 
     # --- Step 1: Embed question ---
     try:
-        q_embed = get_ollama_embeddings([req.question], EMBED_MODEL)[0]
+        q_embed = get_embeddings([req.question], EMBED_MODEL)[0]
     except Exception as e:
+        logger.error(f"Embedding failed: {e}")
         raise HTTPException(status_code=500, detail=f"Embedding failed: {e}")
 
     # --- Step 2: Search in vector DB ---
     try:
-        matches = search_similar(q_embed, k=4)
+        matches = search_similar(q_embed, k=4, filter_docs=req.documents)
     except Exception as e:
+        logger.error(f"Vector search failed: {e}")
         raise HTTPException(status_code=500, detail=f"Vector search failed: {e}")
 
     if not matches:
@@ -81,8 +86,9 @@ def ask_question(req: QueryRequest):
 
     # --- Step 5: Query LLM ---
     try:
-        answer = query_ollama(prompt=prompt, model=LLM_MODEL)
+        answer = query_llm(prompt=prompt, model=LLM_MODEL)
     except Exception as e:
+        logger.error(f"LLM query failed: {e}")
         raise HTTPException(status_code=500, detail=f"LLM query failed: {e}")
 
     return {
