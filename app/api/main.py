@@ -1,20 +1,22 @@
+import os
 from fastapi import FastAPI, UploadFile, File
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import List
-from app.ingestion.ingestion_pipeline import process_documents
-from app.query import router as query_router
-from app.vectorstore import upsert_vectors, ensure_collection, delete_vectors_by_source
+from ingestion.ingestion_pipeline import process_documents
+from llm.query import router as query_router
+from embedding.vectorstore import ensure_collection, delete_vectors_by_source
 import boto3, os, logging
-from dotenv import load_dotenv
 
-load_dotenv()
+from config import Config
+
+config = Config()
 
 # ENV Configs
-MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT")  # e.g. 127.0.0.1:9000
-ACCESS_KEY = os.getenv("ACCESS_KEY")
-SECRET_KEY = os.getenv("SECRET_KEY")
-BUCKET_NAME = os.getenv("BUCKET_NAME")
+MINIO_ENDPOINT = config.MINIO_ENDPOINT
+ACCESS_KEY = config.MINIO_ACCESS_KEY
+SECRET_KEY = config.MINIO_SECRET_KEY
+BUCKET_NAME = config.MINIO_BUCKET
 
 # App
 app = FastAPI()
@@ -84,11 +86,9 @@ async def ingest_from_minio(req: MinIOIngestRequest):
             return {"error": f"⚠️ No vectors extracted from '{req.object_name}'"}
 
         print(f"🧠 Extracted {len(vectors)} vectors.")
-        upsert_vectors(vectors)
         return {"message": f"✅ {len(vectors)} chunks embedded from '{req.object_name}'"}
     except Exception as e:
         return {"error": f"❌ Failed to process document: {e}"}
-
 
 @app.get("/list_documents")
 async def list_documents():
@@ -96,11 +96,10 @@ async def list_documents():
         response = s3.list_objects_v2(Bucket=BUCKET_NAME)
         contents = response.get("Contents", [])
         if not contents:
-            return {"files": []}  # ✅ Return empty list when bucket is empty
+            return {"files": []}
 
         objects = [item["Key"] for item in contents]
         return {"files": objects}
     except Exception as e:
         logging.error(f"❌ Error listing files from MinIO: {e}")
         return {"error": "❌ Could not list documents from MinIO."}
-

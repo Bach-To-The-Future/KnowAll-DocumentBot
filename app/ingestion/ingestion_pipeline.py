@@ -1,25 +1,36 @@
-from app.extraction.options import ExtractStrategy
-from app.embedding import embed_nodes
-from app.vectorstore import upsert_vectors
+import os
+from extraction.options import ExtractStrategy
+from embedding.embed import embed_nodes
+from embedding.vectorstore import upsert_vectors
+import logging
+
+logging.basicConfig(level=logging.INFO)
 
 def process_documents(file_path: str):
-    extractor_cls = ExtractStrategy.get_extractor(file_path)
-    if not extractor_cls:
-        raise ValueError(f"No extractor found for file type: {file_path}")
-
-    print(f"🔍 Using extractor: {extractor_cls.__name__}")
-    nodes = extractor_cls.extract_and_chunk(file_path)
-    print(f"📄 Extracted {len(nodes)} chunks")
-    if not nodes:
+    """Process a document through extraction, embedding, and vector storage."""
+    logger = logging.getLogger(__name__)
+    extractor = ExtractStrategy.get_extractor(file_path)
+    if not extractor:
+        logger.error(f"No extractor found for file: {file_path}")
         return []
 
-    for i, n in enumerate(nodes[:3]):
-        print(f"📎 Chunk {i+1}: {n.text[:100]}...")
+    logger.info(f"Using extractor: {extractor.__class__.__name__}")
+    try:
+        nodes = extractor.extract_and_chunk(file_path)
+        logger.info(f"Extracted {len(nodes)} chunks")
+        if not nodes:
+            return []
 
-    vectors = embed_nodes(nodes)
-    print(f"🧠 Embedded {len(vectors)} vectors")
+        for i, node in enumerate(nodes[:3]):
+            logger.debug(f"Chunk {i+1}: {node.text[:100]}...")
 
-    upsert_vectors(vectors)
-    print(f"✅ Upserted {len(vectors)} vectors to Qdrant")
+        vectors = embed_nodes(nodes)
+        logger.info(f"Embedded {len(vectors)} vectors")
 
-    return vectors
+        upsert_vectors(vectors)
+        logger.info(f"Upserted {len(vectors)} vectors to Qdrant")
+
+        return vectors
+    except Exception as e:
+        logger.error(f"Error processing document {file_path}: {e}")
+        return []

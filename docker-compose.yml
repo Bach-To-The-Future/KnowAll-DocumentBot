@@ -1,0 +1,97 @@
+services:
+  # --- MinIO Object Storage ---
+  minio:
+    image: minio/minio:RELEASE.2025-03-12T18-04-18Z-cpuv1
+    container_name: minio
+    env_file:
+      - ./.env
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/minio/data
+    command: minio server /minio/data --console-address ":9001"
+    networks:
+      - knowall-bot
+
+  # --- QDrant Vectorstore ---
+  qdrant:
+    image: qdrant/qdrant:v1.14.1
+    container_name: qdrant
+    ports:
+      - "6333:6333"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    networks:
+      - knowall-bot
+
+  # --- Ollama LLM ---
+  ollama:
+    image: ollama/ollama:0.9.3
+    container_name: ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    entrypoint: >
+      bash -c "
+        ollama serve &
+        until ollama list > /dev/null 2>&1; do sleep 1; done ;
+        ollama list | grep -q '^nomic-embed-text ' || ollama pull nomic-embed-text ;
+        ollama list | grep -q '^llama3.2:1b ' || ollama pull llama3.2:1b ;
+        wait
+      "
+    networks:
+      - knowall-bot
+
+  # --- FastAPI Backend ---
+  api:
+    build:
+      context: .
+      dockerfile: app/api/Dockerfile
+    container_name: knowall-api
+    command: uvicorn api.main:app --host 0.0.0.0 --port 8000
+    env_file:
+      - ./.env
+    ports:
+      - "8000:8000"
+    depends_on:
+      - minio
+      - qdrant
+      - ollama
+    # healthcheck:
+    #   test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+    #   interval: 10s
+    #   timeout: 5s
+    #   retries: 3
+    networks:
+      - knowall-bot
+
+  # --- Streamlit Frontend ---
+  streamlit:
+    build:
+      context: .
+      dockerfile: app/streamlit_ui/Dockerfile
+    container_name: knowall-ui
+    command: streamlit run streamlit_ui/streamlit_app.py --server.port=8501 --server.address=0.0.0.0
+    env_file:
+      - ./.env
+    ports:
+      - "8501:8501"
+    depends_on:
+      - api
+    networks:
+      - knowall-bot
+
+volumes:
+  qdrant_data:
+    name: qdrant_data
+  minio_data:
+    name: minio_data
+  ollama_data:
+    name: ollama_data
+
+networks:
+  knowall-bot:
+    name: knowall-bot-networks
+    driver: bridge

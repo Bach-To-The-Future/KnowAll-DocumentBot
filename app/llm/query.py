@@ -1,19 +1,21 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from nomic import embed
-from app.vectorstore import search_similar
-from app.ollama_client import query_ollama
-from app.config import Config
+from embedding.vectorstore import search_similar
+from llm.ollama_client import query_ollama
+from embedding.embed import get_ollama_embeddings
+from config import Config
 
 config = Config()
 router = APIRouter()
 
+EMBED_MODEL = config.EMBED_MODEL
+LLM_MODEL = config.LLM_MODEL
 
 # --- ✅ Request Schema ---
 class QueryRequest(BaseModel):
     question: str
     documents: list[str] | None = None  # Optional filter by filenames
-
 
 # --- ✅ Response Schema (optional, for stricter typing) ---
 class Citation(BaseModel):
@@ -21,7 +23,6 @@ class Citation(BaseModel):
     text: str
     source: str
     page_number: str | int
-
 
 # --- ✅ Query Endpoint ---
 @router.post("/query")
@@ -31,7 +32,7 @@ def ask_question(req: QueryRequest):
 
     # --- Step 1: Embed question ---
     try:
-        q_embed = embed.text([req.question], model=config.EMBED_MODEL)["embeddings"][0]
+        q_embed = get_ollama_embeddings([req.question], EMBED_MODEL)[0]
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Embedding failed: {e}")
 
@@ -67,7 +68,7 @@ def ask_question(req: QueryRequest):
         numbered_context += f"[{idx}] {text}\n\n"
 
     # --- Step 4: Construct prompt for LLM ---
-    prompt = f"""You are a knowledgeable document chatbot. Use only the numbered context documents below to answer the user's question as accurately and concisely as possible. 
+    prompt = f"""You are a knowledgeable document chatbot. Use the numbered context documents below as extra knowledge to answer the user's question as accurately and concisely as possible. 
     If you reference specific information, cite the relevant reference number(s) in square brackets, like [1], [2], etc. 
     If the information is not available in the context, politely say so.
 
@@ -80,7 +81,7 @@ def ask_question(req: QueryRequest):
 
     # --- Step 5: Query LLM ---
     try:
-        answer = query_ollama(prompt=prompt, model="llama3.2:1b")
+        answer = query_ollama(prompt=prompt, model=LLM_MODEL)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"LLM query failed: {e}")
 

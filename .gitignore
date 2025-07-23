@@ -5,4 +5,8 @@
 *instructions.txt
 *documents/
 *.ipynb
+<<<<<<< HEAD
 *minio_downloads/
+=======
+*minio_downloads/
+>>>>>>> dock_contain

@@ -3,19 +3,17 @@ from minio import Minio
 import requests
 import io, os
 import textwrap
-from dotenv import load_dotenv
 
-# --- Constants ---
-API_BASE_URL = "http://localhost:8000"
-PAGE_SIZE = 5
+from config import Config
 
-# --- Load environment variables ---
-load_dotenv()
+config = Config()
 
-MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT")
-ACCESS_KEY = os.getenv("ACCESS_KEY")
-SECRET_KEY = os.getenv("SECRET_KEY")
-BUCKET_NAME = os.getenv("BUCKET_NAME")
+API_BASE_URL = config.STREAMLIT_API_URL
+PAGE_SIZE = config.STREAMLIT_PAGE_SIZE
+MINIO_ENDPOINT = config.MINIO_ENDPOINT
+ACCESS_KEY = config.MINIO_ACCESS_KEY
+SECRET_KEY = config.MINIO_SECRET_KEY
+BUCKET_NAME = config.MINIO_BUCKET
 
 client = Minio(
     MINIO_ENDPOINT,
@@ -32,7 +30,6 @@ st.session_state.setdefault("uploaded_files", set())
 st.session_state.setdefault("selected_docs", set())
 
 # --- Helper Functions ---
-
 def safe_api_call(request_func, *args, **kwargs):
     try:
         res = request_func(*args, **kwargs)
@@ -42,6 +39,13 @@ def safe_api_call(request_func, *args, **kwargs):
         st.error(f"Network error: {e}")
         return None
 
+# --- Ensure MinIO bucket exists (create it if not) ---
+def ensure_minio_bucket(bucket_name):
+    found = client.bucket_exists(bucket_name)
+    if not found:
+        client.make_bucket(bucket_name)
+
+# --- Fetch document list (for tab 2) ---
 @st.cache_data(ttl=30)
 def fetch_document_list():
     res = safe_api_call(requests.get, f"{API_BASE_URL}/list_documents")
@@ -51,12 +55,20 @@ def fetch_document_list():
         return files
     return None
 
+# --- Upload the document to minio and embed to qdrant ---
 def upload_and_embed_to_minio(uploaded_file):
     object_name = uploaded_file.name
     if object_name in st.session_state.uploaded_files:
         st.info(f"ℹ️ `{object_name}` already uploaded and embedded.")
         return
     file_data = uploaded_file.getvalue()
+
+    # Ensure the bucket exists
+    try:
+        ensure_minio_bucket(BUCKET_NAME)
+    except Exception as e:
+        st.error(f"❌ Failed to ensure MinIO bucket: {e}")
+        return
 
     try:
         client.put_object(
@@ -77,11 +89,30 @@ def upload_and_embed_to_minio(uploaded_file):
     })
 
     if res:
-        st.success(res.json().get("message", "✅ File embedded successfully"))
-        st.session_state.uploaded_files.add(object_name)
-        st.cache_data.clear()
+        res_json = res.json()
+        # Check for error message
+        error_message = res_json.get("error")
+        if error_message:
+            st.warning(f"❗ Backend message: {error_message}")
+            return
+
+        # Extract embedded count from message (e.g., "✅ 23 chunks embedded from 'file.docx'")
+        import re
+        message = res_json.get("message", "")
+        match = re.search(r"(\d+) chunks embedded", message)
+        embedded_count = int(match.group(1)) if match else 0
+
+        if embedded_count == 0:
+            st.warning(f"⚠️ No chunks were embedded from `{object_name}`. Skipped indexing.")
+            if message:
+                st.warning(f"❗ Backend message: {message}")
+        else:
+            st.success(f"✅ File embedded successfully with {embedded_count} chunks.")
+            st.session_state.uploaded_files.add(object_name)
+            st.cache_data.clear()
     else:
         st.error("❌ Failed to embed file.")
+
 
 def format_reference_text(text, max_width=100):
     wrapped = textwrap.fill(text, width=max_width)
@@ -161,7 +192,6 @@ with tab2:
             selected = st.multiselect(
                 "Choose documents (selection persists across pages):",
                 options=current_page_files,
-                default=st.session_state[page_key],
                 key=page_key
             )
 
@@ -245,46 +275,86 @@ with tab3:
         elif not st.session_state.selected_docs:
             st.warning("⚠️ Please select at least one document.")
         else:
-            st.write("📡 Querying...")
-            try:
-                response = safe_api_call(
-                    requests.post,
-                    f"{API_BASE_URL}/query",
-                    json={
-                        "question": question,
-                        "documents": list(st.session_state.selected_docs)
-                    }
-                )
-                if response:
-                    result = response.json()
-                    st.markdown("### 🧠 Answer")
-                    st.write(result.get("answer_with_refs", "No answer returned."))
+            # Create a placeholder for the spinner and results
+            placeholder = st.empty()
+            with placeholder.container():
+                with st.spinner("📡 Querying..."):
+                    try:
+                        response = safe_api_call(
+                            requests.post,
+                            f"{API_BASE_URL}/query",
+                            json={
+                                "question": question,
+                                "documents": list(st.session_state.selected_docs)
+                            }
+                        )
+                        # Clear spinner and display results
+                        placeholder.empty()
+                        with placeholder.container():
+                            if response:
+                                result = response.json()
+                                st.markdown("### 🧠 Answer")
+                                st.write(result.get("answer_with_refs", "No answer returned."))
 
-                    citations = result.get("citations", [])
-                    if citations:
-                        # Only show references from selected docs!
-                        valid_sources = set(os.path.basename(f) for f in st.session_state.selected_docs)
-                        filtered_citations = [
-                            ref for ref in citations
-                            if os.path.basename(ref.get("source", "")) in valid_sources
-                        ]
-                        if filtered_citations:
-                            st.markdown("### 📄 References")
-                            for ref in filtered_citations:
-                                index = ref.get("index", "?")
-                                source = os.path.basename(ref.get("source", "unknown"))
-                                page = ref.get("page_number", "?")
-                                snippet = ref.get("text", "")
-                                st.markdown(f"**[{index}] Page {page} — {source}**")
-                                st.markdown(snippet)
-                        else:
-                            st.info("ℹ️ No references returned from selected documents.")
-                    else:
-                        st.info("ℹ️ No references returned.")
-                else:
-                    st.error("❌ Query failed due to network error.")
-            except Exception as e:
-                st.error(f"❌ Exception during query: {e}")
+                                citations = result.get("citations", [])
+                                if citations:
+                                    # Only show references from selected docs
+                                    valid_sources = set(os.path.basename(f) for f in st.session_state.selected_docs)
+                                    filtered_citations = [
+                                        ref for ref in citations
+                                        if os.path.basename(ref.get("source", "")) in valid_sources
+                                    ]
+                                    if filtered_citations:
+                                        st.markdown("### 📄 References")
+                                        for ref in filtered_citations:
+                                            index = ref.get("index", "?")
+                                            source = os.path.basename(ref.get("source", "unknown"))
+                                            page = ref.get("page_number", "?")
+                                            snippet = format_reference_text(ref.get("text", ""))
+                                            st.markdown(f"**[{index}] Page {page} — {source}**")
+                                            st.markdown(f"**Chunk Preview:** {snippet}")
+
+                                            # Fetch and display full document content
+                                            with st.expander(f"📖 View Full Document: {source}", expanded=False):
+                                                # Check cache first
+                                                if source in st.session_state.cached_doc_content:
+                                                    doc_content = st.session_state.cached_doc_content[source]
+                                                else:
+                                                    doc_response = safe_api_call(
+                                                        requests.get,
+                                                        f"{API_BASE_URL}/get_document",
+                                                        params={"object_name": source}
+                                                    )
+                                                    if doc_response:
+                                                        doc_content = doc_response.json().get("content", "")
+                                                        st.session_state.cached_doc_content[source] = doc_content
+                                                    else:
+                                                        st.error("❌ Failed to fetch document content.")
+                                                        continue
+
+                                                if doc_content:
+                                                    if source.endswith(('.csv', '.xlsx')):
+                                                        try:
+                                                            df = pd.read_csv(io.StringIO(doc_content)) if source.endswith('.csv') else pd.read_excel(io.BytesIO(doc_content.encode('utf-8')))
+                                                            st.markdown("**Table Data:**")
+                                                            st.dataframe(df)  # Display full dataframe
+                                                        except Exception as e:
+                                                            st.error(f"❌ Failed to parse table data: {e}")
+                                                    else:
+                                                        st.markdown("**Text Content:**")
+                                                        st.text_area("", doc_content, height=600)  # Increased height
+                                                else:
+                                                    st.error(doc_response.json().get("error", "No content returned"))
+                                    else:
+                                        st.info("ℹ️ No references returned from selected documents.")
+                                else:
+                                    st.info("ℹ️ No references returned.")
+                            else:
+                                st.error("❌ Query failed due to network error.")
+                    except Exception as e:
+                        placeholder.empty()
+                        with placeholder.container():
+                            st.error(f"❌ Exception during query: {e}")
 
 # --- Optionally, add a sidebar for global cache clear ---
 # with st.sidebar:

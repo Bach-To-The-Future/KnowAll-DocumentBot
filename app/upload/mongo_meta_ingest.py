@@ -3,19 +3,20 @@ import logging
 from datetime import datetime
 import os
 from minio import Minio
-from dotenv import load_dotenv
 
-load_dotenv()
+from config import Config
+
 logging.basicConfig(level=logging.INFO)
+config = Config()
 
-ENDPOINT = os.getenv("MINIO_ENDPOINT")
-ACCESS_KEY = os.getenv("ACCESS_KEY")
-SECRET_KEY = os.getenv("SECRET_KEY")
-BUCKET_NAME = os.getenv("BUCKET_NAME")
+ENDPOINT = config.MINIO_ENDPOINT
+ACCESS_KEY = config.MINIO_ACCESS_KEY
+SECRET_KEY = config.MINIO_SECRET_KEY
+BUCKET_NAME = config.MINIO_BUCKET
 
-MONGODB_URI = os.getenv("MONGODB_URI")
-MONGO_DB = os.getenv("MONGO_DB")
-MONGO_COLLECTION = os.getenv("MONGO_COLLECTION")
+MONGODB_URI = config.MONGO_URI
+MONGO_DB = config.MONGO_DB
+MONGO_COLLECTION = config.MONGO_COLLECTION
 
 class Mongo_meta:
     def __init__(self):
