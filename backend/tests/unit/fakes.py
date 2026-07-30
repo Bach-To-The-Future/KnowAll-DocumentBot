@@ -1,6 +1,6 @@
 """Interface fakes for unit tests — injected through the same constructor
 seams production uses; no monkeypatching of module globals required."""
-from typing import AsyncIterator, Sequence
+from collections.abc import AsyncIterator, Sequence
 
 from core.interfaces import CacheStore, DenseEmbedder, LLMClient, Reranker, VectorStore
 from models.schemas import ScoredChunk, VectorRecord

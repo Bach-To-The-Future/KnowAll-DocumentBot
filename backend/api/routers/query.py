@@ -10,7 +10,7 @@ timed out and the container was restarted mid-flight.
 """
 import asyncio
 import logging
-from typing import AsyncIterator
+from collections.abc import AsyncIterator
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse

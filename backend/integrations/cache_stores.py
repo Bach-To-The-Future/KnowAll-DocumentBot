@@ -8,7 +8,6 @@ import logging
 import threading
 import time
 from collections import OrderedDict, deque
-from typing import Deque
 
 from core.config import Settings
 from core.interfaces import CacheStore
@@ -27,7 +26,7 @@ class InMemoryCacheStore(CacheStore):
         self._max_entries = max_entries
         self._data: OrderedDict[str, tuple[float, str]] = OrderedDict()
         self._counters: dict[str, tuple[float, int]] = {}
-        self._lists: dict[str, Deque[str]] = {}
+        self._lists: dict[str, deque[str]] = {}
         self._lock = threading.Lock()
 
     def get(self, key: str) -> str | None:
@@ -94,7 +93,8 @@ class RedisCacheStore(CacheStore):
 
     def get(self, key: str) -> str | None:
         try:
-            return self._redis.get(key)
+            value = self._redis.get(key)
+            return None if value is None else str(value)
         except Exception as e:
             logger.warning(f"Cache get failed ({e}); treating as miss.")
             return None

@@ -1,21 +1,23 @@
-import os
-from typing import Iterator, List, Optional, Union
 import logging
+import os
+from collections.abc import Iterator
+
 from docx import Document as DocxDocument
 from docx.oxml.table import CT_Tbl
 from docx.oxml.text.paragraph import CT_P
 from docx.table import Table
 from docx.text.paragraph import Paragraph
 from llama_index.core import Document
+
 from extraction.base import BaseExtractor
-from extraction.helper import generate_metadata, dynamic_rows_per_chunk
+from extraction.helper import dynamic_rows_per_chunk, generate_metadata
 
 logging.basicConfig(level=logging.INFO)
 
 
 class ExtractDOCX(BaseExtractor):
     @staticmethod
-    def _iter_block_items(docx) -> Iterator[Union[Paragraph, Table]]:
+    def _iter_block_items(docx) -> Iterator[Paragraph | Table]:
         """Yield paragraphs and tables in true document order (python-docx
         exposes doc.tables separately, which loses their position)."""
         for child in docx.element.body.iterchildren():
@@ -25,7 +27,7 @@ class ExtractDOCX(BaseExtractor):
                 yield Table(child, docx)
 
     @staticmethod
-    def _heading_level(paragraph: Paragraph) -> Optional[int]:
+    def _heading_level(paragraph: Paragraph) -> int | None:
         style = paragraph.style.name if paragraph.style else ""
         if style and style.startswith("Heading"):
             try:
@@ -35,7 +37,7 @@ class ExtractDOCX(BaseExtractor):
         return None
 
     @staticmethod
-    def _table_chunks(table: Table) -> List[str]:
+    def _table_chunks(table: Table) -> list[str]:
         """Row-group chunks; the header row is repeated in every chunk so no
         chunk is header-less."""
         rows = [[cell.text.strip() for cell in row.cells] for row in table.rows]
@@ -54,7 +56,7 @@ class ExtractDOCX(BaseExtractor):
             chunks.append(f"{header}\n{body}")
         return chunks
 
-    def extract_and_chunk(self, file_path: str) -> List[Document]:
+    def extract_and_chunk(self, file_path: str) -> list[Document]:
         """Heading-path chunking: split on heading boundaries, prepend the
         full hierarchy ("Doc > H1 > H2") to every chunk before embedding."""
         if not self.validate_file(file_path):
@@ -66,9 +68,9 @@ class ExtractDOCX(BaseExtractor):
         ext = os.path.splitext(file_path)[-1][1:].lower()
 
         docx = DocxDocument(file_path)
-        all_nodes: List[Document] = []
-        heading_stack: List[tuple] = []  # [(level, heading_text)]
-        buffer: List[str] = []
+        all_nodes: list[Document] = []
+        heading_stack: list[tuple] = []  # [(level, heading_text)]
+        buffer: list[str] = []
 
         def current_path() -> str:
             return " > ".join([stem] + [text for _, text in heading_stack])

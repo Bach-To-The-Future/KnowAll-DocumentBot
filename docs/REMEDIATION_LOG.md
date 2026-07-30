@@ -298,3 +298,54 @@ prefers full scan for segments under the threshold, so `m`/`ef_construct`/`ef`
 changes would produce no observable delta. Phase 3.1 (HNSW) should stay deferred
 until the corpus exceeds the threshold by a wide margin; `recall_at_fetch` is
 the correct first measurement.
+
+## [Phase 1.2] Make ruff, mypy and pytest pass
+Status: DONE
+Finding ref: #14 (CONFIRMED), #15 (PARTIALLY INCORRECT — see 0.3), #23 (CONFIRMED)
+Change: Configured bugbear for FastAPI's dependency idiom, applied ruff
+autofixes, and resolved all 26 mypy errors without adding a single new
+`# type: ignore`.
+Files: `pyproject.toml`, `core/interfaces.py`, `api/dependencies.py`,
+`api/main.py`, `integrations/{qdrant_store,reranker,cache_stores,object_storage,llm_clients}.py`,
+`extraction/{base,helper,options,pdf,pptx}.py`, `services/{query,ingestion,retrieval}.py`,
+plus 19 files touched by autofix
+Evidence:
+```
+ruff check backend      →  All checks passed!          (was 105 errors)
+mypy --config-file …    →  Success: no issues found in 29 source files   (was 26 errors / 16 files)
+pytest -q (container)   →  53 passed                   (unchanged — no behavior change)
+docker compose build    →  BUILD_OK; 7/7 healthy
+```
+Eval: n/a — no retrieval/generation behavior touched (R2: the evidence here is
+the three gates flipping red→green with tests unchanged).
+Commit: see below
+Notes — decisions worth knowing:
+  - **B008 was NOT ignored.** `flake8-bugbear.extend-immutable-calls` declares
+    `fastapi.Depends/File/Header/Body/Query/Path/Form` immutable. A blanket
+    `ignore = ["B008"]` would also have hidden real mutable-default bugs.
+  - **B905 (3 × `zip()` without `strict=`) was fixed, not suppressed**, and the
+    fix *strengthens* an invariant: `qdrant_store.upsert`, `ingestion._embed_chunks`
+    and `retrieval._rerank_pool` all zip sequences that must be equal length.
+    `strict=True` turns a silent misalignment into a loud `ValueError` — the
+    same class of defect the text↔vector alignment guard exists for (R6).
+  - **F23 fixed** — `api/dependencies.container_from_app()` is a typed accessor
+    with an `isinstance` gate. This is the root cause of the "unused ignore"
+    puzzle in 0.3: `app.state.container` was `Any`, so nothing downstream of it
+    was checked.
+  - **The `# type: ignore[attr-defined]` pair in main.py is gone for the right
+    reason.** A `Warmable` mixin now declares `warm()` on the `VectorStore` and
+    `Reranker` interfaces (default no-op); `QdrantVectorStore.warm()` loads the
+    BM25 model. The lifespan calls a typed contract instead of an `Any` lookup.
+  - **`ChunkLike` is now a read-only Protocol.** Root cause of the 7 extractor
+    override errors: llama_index exposes `text` as a property, which cannot
+    satisfy a mutable-attribute Protocol. Verified at runtime that `Document`
+    and `TextNode` share **no** nominal supertype carrying `.text`
+    (`Document.__mro__` = Document → Node → BaseNode; `BaseNode` has no `text`
+    field), so the structural Protocol is the only accurate annotation — this
+    is exactly what it was introduced for. Consumers only read `.text` and
+    mutate the dict returned by `.metadata`, so read-only is truthful.
+  - `# type: ignore` count: 13 → 10, and the 3 removed were the misleading ones.
+    The remainder are pydantic `computed_field` (3) and OpenAI SDK message
+    types (3), both third-party stub limitations, plus 3 in tests and 1 in
+    `ingestion.py:157`.
+  - F24 (pytest cache permission warning) still present; cosmetic, deferred.

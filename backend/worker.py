@@ -24,7 +24,7 @@ import multiprocessing
 import time
 from concurrent.futures import ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
-from typing import Any, Optional
+from typing import Any
 
 from arq import Retry
 from arq.connections import RedisSettings
@@ -44,7 +44,7 @@ _settings = get_settings()
 
 # --- parent process: bookkeeping only (job store, DLQ) ----------------------
 
-_container: Optional[ServiceContainer] = None
+_container: ServiceContainer | None = None
 
 
 def get_container() -> ServiceContainer:
@@ -56,7 +56,7 @@ def get_container() -> ServiceContainer:
 
 # --- child processes: the actual ingest work --------------------------------
 
-_child_container: Optional[ServiceContainer] = None
+_child_container: ServiceContainer | None = None
 
 
 def _child_init() -> None:
@@ -84,7 +84,7 @@ def _run_ingest(job_id: str, bucket: str, object_name: str,
 
 # --- pool lifecycle ----------------------------------------------------------
 
-_pool: Optional[ProcessPoolExecutor] = None
+_pool: ProcessPoolExecutor | None = None
 
 
 def _get_pool(settings: Settings) -> ProcessPoolExecutor:
@@ -186,7 +186,7 @@ async def ingest_document(ctx: dict, job_id: str, bucket: str, object_name: str,
         # actually reclaims the process, its memory and its temp directory.
         await asyncio.wait_for(future, timeout=_settings.ingest_job_timeout)
         return
-    except asyncio.TimeoutError:
+    except TimeoutError:
         _kill_pool()
         error = f"Ingestion exceeded {_settings.ingest_job_timeout}s and was terminated."
         logger.error(f"[job {job_id}] {error}")

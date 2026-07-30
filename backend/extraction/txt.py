@@ -1,9 +1,10 @@
-import os
-import chardet
-from typing import List
-from llama_index.core import Document
 import logging
+import os
 import re
+
+import chardet
+from llama_index.core import Document
+
 from extraction.base import BaseExtractor
 from extraction.helper import generate_metadata
 
@@ -23,7 +24,7 @@ class ExtractTXT(BaseExtractor):
             encoding = "utf-8"
         return encoding
 
-    def extract_and_chunk(self, file_path: str) -> List[Document]:
+    def extract_and_chunk(self, file_path: str) -> list[Document]:
         """Heading-path chunking for TXT/MD: split on markdown heading
         boundaries and prepend the heading hierarchy to every chunk."""
         if not self.validate_file(file_path):
@@ -35,12 +36,12 @@ class ExtractTXT(BaseExtractor):
         ext = os.path.splitext(file_path)[-1][1:].lower()
 
         encoding = self.detect_encoding(file_path)
-        with open(file_path, "r", encoding=encoding) as f:
+        with open(file_path, encoding=encoding) as f:
             lines = f.read().splitlines()
 
-        all_nodes: List[Document] = []
-        heading_stack: List[tuple] = []  # [(level, heading_text)]
-        buffer: List[str] = []
+        all_nodes: list[Document] = []
+        heading_stack: list[tuple] = []  # [(level, heading_text)]
+        buffer: list[str] = []
 
         def current_path() -> str:
             return " > ".join([stem] + [text for _, text in heading_stack])

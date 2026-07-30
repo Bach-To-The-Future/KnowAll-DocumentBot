@@ -2,6 +2,7 @@
 import logging
 import tempfile
 
+from arq.constants import default_queue_name
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Request, UploadFile
 from starlette.concurrency import run_in_threadpool
 
@@ -11,8 +12,6 @@ from api.dependencies import (
     get_job_store,
     get_settings_dep,
 )
-from arq.constants import default_queue_name
-
 from core.config import Settings
 from core.exceptions import JobNotFoundError, PayloadTooLargeError, ServiceOverloadedError
 from core.interfaces import JobStore

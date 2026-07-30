@@ -3,8 +3,8 @@ in-memory (dev fallback, volatile)."""
 import json
 import logging
 import threading
-from datetime import datetime, timezone
-from typing import Any, Optional
+from datetime import UTC, datetime
+from typing import Any
 
 from core.config import Settings
 from core.interfaces import JobStore
@@ -15,7 +15,7 @@ JOB_TTL_SECONDS = 7 * 24 * 3600
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 class InMemoryJobStore(JobStore):

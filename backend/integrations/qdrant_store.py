@@ -8,7 +8,8 @@ or fastembed types.
 import logging
 import threading
 import uuid
-from typing import Any, Optional, Sequence
+from collections.abc import Sequence
+from typing import Any
 
 from fastembed import SparseTextEmbedding
 from qdrant_client import QdrantClient
@@ -39,9 +40,9 @@ class QdrantVectorStore(VectorStore):
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
         self._collection = settings.qdrant_collection
-        self._client: Optional[QdrantClient] = None
+        self._client: QdrantClient | None = None
         self._client_lock = threading.Lock()
-        self._sparse_model: Optional[SparseTextEmbedding] = None
+        self._sparse_model: SparseTextEmbedding | None = None
         # fastembed models are not documented thread-safe; BM25 encoding is
         # fast enough to serialize behind one lock.
         self._sparse_lock = threading.Lock()
@@ -75,6 +76,11 @@ class QdrantVectorStore(VectorStore):
                         ) from e
                     self._client = client
         return self._client
+
+    def warm(self) -> None:
+        """Warmable: pre-load the BM25 model so the first upsert/query does
+        not pay the load cost inside a request."""
+        self.get_sparse_model()
 
     def get_sparse_model(self) -> SparseTextEmbedding:
         if self._sparse_model is None:
@@ -177,7 +183,9 @@ class QdrantVectorStore(VectorStore):
         sparse_vectors = self._sparse_documents([r.text for r in records])
 
         points = []
-        for i, (record, sparse) in enumerate(zip(records, sparse_vectors)):
+        # strict=True: records and sparse vectors are produced 1:1; a length
+        # mismatch would silently pair a chunk with another chunk's vector.
+        for i, (record, sparse) in enumerate(zip(records, sparse_vectors, strict=True)):
             if len(record.embedding) != self._settings.embed_dim:
                 raise VectorStoreError(
                     f"Embedding size {len(record.embedding)} does not match expected "
@@ -204,7 +212,7 @@ class QdrantVectorStore(VectorStore):
     # --- reads ------------------------------------------------------------------
 
     @staticmethod
-    def _source_filter(filter_sources: list[str] | None) -> Optional[qm.Filter]:
+    def _source_filter(filter_sources: list[str] | None) -> qm.Filter | None:
         if not filter_sources:
             return None
         return qm.Filter(

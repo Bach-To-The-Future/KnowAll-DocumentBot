@@ -10,7 +10,8 @@ Clients are pooled per instance and closed from the app lifespan.
 """
 import json
 import logging
-from typing import Any, AsyncIterator, Optional
+from collections.abc import AsyncIterator
+from typing import Any, cast
 
 import httpx
 import openai
@@ -38,8 +39,8 @@ class OllamaClient(LLMClient):
         self._timeout = httpx.Timeout(
             connect=5.0, read=settings.llm_read_timeout, write=10.0, pool=5.0
         )
-        self._sync_client: Optional[httpx.Client] = None
-        self._async_client: Optional[httpx.AsyncClient] = None
+        self._sync_client: httpx.Client | None = None
+        self._async_client: httpx.AsyncClient | None = None
 
     def _payload(self, prompt: str, stream: bool, system_prompt: str | None) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -123,8 +124,8 @@ class OpenAIClient(LLMClient):
         self._model = settings.llm_model
         self._temperature = settings.llm_temperature
         self._max_tokens = settings.llm_num_predict
-        self._sync_client: Optional[openai.OpenAI] = None
-        self._async_client: Optional[openai.AsyncOpenAI] = None
+        self._sync_client: openai.OpenAI | None = None
+        self._async_client: openai.AsyncOpenAI | None = None
 
     @staticmethod
     def _messages(prompt: str, system_prompt: str | None) -> list[dict[str, str]]:
@@ -177,7 +178,9 @@ class OpenAIClient(LLMClient):
                 max_tokens=self._max_tokens,
                 stream=True,
             )
-            async for event in stream:
+            # stream=True always yields AsyncStream at runtime; the SDK's
+            # overload widens the static type to a union.
+            async for event in cast("openai.AsyncStream[Any]", stream):
                 delta = event.choices[0].delta.content if event.choices else None
                 if delta:
                     yield delta

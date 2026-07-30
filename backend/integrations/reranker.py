@@ -2,7 +2,6 @@
 import logging
 import math
 import threading
-from typing import Optional
 
 from fastembed.rerank.cross_encoder import TextCrossEncoder
 
@@ -19,7 +18,7 @@ def _sigmoid(x: float) -> float:
 class FastembedReranker(Reranker):
     def __init__(self, settings: Settings) -> None:
         self._model_name = settings.reranker_model
-        self._encoder: Optional[TextCrossEncoder] = None
+        self._encoder: TextCrossEncoder | None = None
         self._lock = threading.Lock()
 
     def _get_encoder(self) -> TextCrossEncoder:

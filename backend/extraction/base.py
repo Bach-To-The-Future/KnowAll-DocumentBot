@@ -2,13 +2,13 @@
 core.interfaces.DocumentExtractor contract through this base class."""
 import logging
 import os
-from typing import List
+from typing import cast
 
 from llama_index.core import Document
 from llama_index.core.node_parser import SentenceSplitter
 
 from core.config import get_settings
-from core.interfaces import DocumentExtractor
+from core.interfaces import ChunkLike, DocumentExtractor
 
 logging.basicConfig(level=logging.INFO)
 
@@ -41,13 +41,20 @@ class BaseExtractor(DocumentExtractor):
         doc.metadata = metadata
         return doc
 
-    def chunk_document(self, document: Document | None) -> List[Document]:
-        """Chunk a Document using SentenceSplitter."""
+    def chunk_document(self, document: Document | None) -> list[ChunkLike]:
+        """Chunk a Document using SentenceSplitter.
+
+        Returns BaseNode, not Document: the splitter emits TextNode. Both
+        satisfy the ChunkLike protocol the ingestion pipeline consumes."""
         if not document:
             return []
-        return self.splitter.get_nodes_from_documents([document])
+        # get_nodes_from_documents is declared list[BaseNode] but emits
+        # TextNode, which carries .text/.metadata; ChunkLike states that
+        # structurally because Document and TextNode share no nominal
+        # supertype exposing .text.
+        return cast(list[ChunkLike], self.splitter.get_nodes_from_documents([document]))
 
-    def chunk_text(self, text: str) -> List[str]:
+    def chunk_text(self, text: str) -> list[str]:
         """Split raw text into chunk strings (used when the extractor builds
         its own Documents, e.g. to prepend a heading path to every chunk)."""
         if not text or not text.strip():

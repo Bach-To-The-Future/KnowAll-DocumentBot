@@ -1,12 +1,13 @@
-import os
-import pandas as pd
-import chardet
 import csv
-from typing import List
-from llama_index.core import Document
 import logging
+import os
+
+import chardet
+import pandas as pd
+from llama_index.core import Document
+
 from extraction.base import BaseExtractor
-from extraction.helper import generate_metadata, dynamic_rows_per_chunk
+from extraction.helper import dynamic_rows_per_chunk, generate_metadata
 
 logging.basicConfig(level=logging.INFO)
 
@@ -27,7 +28,7 @@ class ExtractCSV(BaseExtractor):
     @staticmethod
     def detect_delimiter(file_path: str, encoding: str = "utf-8") -> str:
         """Detect CSV delimiter using csv.Sniffer."""
-        with open(file_path, "r", encoding=encoding) as csv_file:
+        with open(file_path, encoding=encoding) as csv_file:
             sample = csv_file.read(2048)
             try:
                 sniffer = csv.Sniffer()
@@ -35,7 +36,7 @@ class ExtractCSV(BaseExtractor):
             except csv.Error:
                 return ","
 
-    def extract_and_chunk(self, file_path: str) -> List[Document]:
+    def extract_and_chunk(self, file_path: str) -> list[Document]:
         """Row-group chunking: never sentence-split serialized tables.
 
         Each chunk is a standalone mini-CSV — to_csv() re-emits the header
@@ -50,7 +51,7 @@ class ExtractCSV(BaseExtractor):
 
         encoding = self.detect_encoding(file_path)
         delimiter = self.detect_delimiter(file_path, encoding)
-        all_nodes: List[Document] = []
+        all_nodes: list[Document] = []
         row_offset = 0
 
         for block in pd.read_csv(file_path, encoding=encoding, delimiter=delimiter,

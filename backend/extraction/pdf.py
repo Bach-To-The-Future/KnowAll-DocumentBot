@@ -1,12 +1,13 @@
+import logging
 import os
+
 import fitz
 import pandas as pd
 import pdfplumber
-from typing import List, Optional
-import logging
-from llama_index.core import Document
+
 from core.config import get_settings
 from core.exceptions import ExtractionError
+from core.interfaces import ChunkLike
 from extraction.base import BaseExtractor
 from extraction.helper import generate_metadata
 
@@ -17,7 +18,7 @@ config = get_settings()
 
 # Cached availability probe: "ok" or a human-readable reason. Checked once
 # per process — OCR degrades gracefully to a clear error, never a crash.
-_ocr_status: Optional[str] = None
+_ocr_status: str | None = None
 
 
 def ocr_availability() -> str:
@@ -46,7 +47,7 @@ class ExtractPDF(BaseExtractor):
         image = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
         return pytesseract.image_to_string(image, lang=config.ocr_languages) or ""
 
-    def extract_and_chunk(self, file_path: str) -> List[Document]:
+    def extract_and_chunk(self, file_path: str) -> list[ChunkLike]:
         """Extract and chunk PDF content with metadata.
 
         Pages without an extractable text layer (scanned documents) fall back
@@ -62,7 +63,7 @@ class ExtractPDF(BaseExtractor):
         ocr_state = ocr_availability()
         ocr_pages = 0
 
-        all_nodes = []
+        all_nodes: list[ChunkLike] = []
         with pdfplumber.open(file_path) as pdf, fitz.open(file_path) as pdf_doc:
             image_counts = {}
             for page_index in range(pdf_doc.page_count):
@@ -72,7 +73,7 @@ class ExtractPDF(BaseExtractor):
 
             for page_num, page in enumerate(pdf.pages, start=1):
                 # Extract text; OCR only when the text layer is empty.
-                text = page.extract_text()
+                text: str | None = page.extract_text()
                 content_type = "text"
                 if (not text or not text.strip()) and ocr_state == "ok":
                     try:

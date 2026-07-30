@@ -8,8 +8,9 @@ import json
 import logging
 import os
 import re
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
-from typing import Any, AsyncIterator
+from typing import Any
 
 from starlette.concurrency import run_in_threadpool
 
@@ -210,7 +211,7 @@ class QueryService:
             cache_key = self._make_cache_key(standalone, filters)
             cached = self._cache_get(cache_key)
             if cached is not None:
-                trace = {
+                trace: dict[str, Any] = {
                     "trace_id": new_trace_id(),
                     "session_id": req.session_id,
                     "original_question": req.question,

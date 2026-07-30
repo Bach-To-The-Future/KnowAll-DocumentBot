@@ -1,15 +1,16 @@
-from pptx import Presentation
-from typing import List
-from llama_index.core import Document
 import logging
 import os
+
+from pptx import Presentation
+
+from core.interfaces import ChunkLike
 from extraction.base import BaseExtractor
 from extraction.helper import generate_metadata
 
 logging.basicConfig(level=logging.INFO)
 
 class ExtractPPTX(BaseExtractor):
-    def extract_and_chunk(self, file_path: str) -> List[Document]:
+    def extract_and_chunk(self, file_path: str) -> list[ChunkLike]:
         """Extract and chunk PPTX content with metadata."""
         if not self.validate_file(file_path):
             return []
@@ -20,7 +21,7 @@ class ExtractPPTX(BaseExtractor):
 
         try:
             prs = Presentation(file_path)
-            all_nodes = []
+            all_nodes: list[ChunkLike] = []
 
             for slide_num, slide in enumerate(prs.slides, start=1):
                 slide_text = []

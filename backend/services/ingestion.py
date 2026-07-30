@@ -6,10 +6,9 @@ import os
 import shutil
 import tempfile
 import uuid
-from typing import Any
 
 from core.config import Settings
-from core.exceptions import ExtractionError, InvalidRequestError, UnsupportedFormatError
+from core.exceptions import ExtractionError, InvalidRequestError
 from core.interfaces import CacheStore, ChunkLike, DenseEmbedder, JobStore, VectorStore
 from integrations.object_storage import MinIOObjectStorage
 from models.schemas import VectorRecord
@@ -182,7 +181,9 @@ class IngestionService:
             )
         return [
             VectorRecord(embedding=emb, text=node.text, metadata=dict(node.metadata))
-            for node, emb in zip(filtered, embeddings)
+            # strict=True mirrors the explicit count check above; both guard
+            # the text<->vector alignment invariant.
+            for node, emb in zip(filtered, embeddings, strict=True)
         ]
 
     # --- deletion ---------------------------------------------------------------

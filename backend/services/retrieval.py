@@ -4,8 +4,8 @@ cross-encoder rerank -> context expansion (section-parent or ±window).
 Depends only on the VectorStore / DenseEmbedder / Reranker interfaces.
 """
 import logging
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any, Callable, Optional
 
 from core.config import Settings
 from core.interfaces import DenseEmbedder, Reranker, VectorStore
@@ -163,7 +163,10 @@ class RetrievalService:
             return []
 
         scores = self._reranker.scores(query, [c.text for c in candidates])
-        scored = sorted(zip(scores, candidates), key=lambda item: item[0], reverse=True)
+        # strict=True: the reranker contract is one score per candidate.
+        scored = sorted(
+            zip(scores, candidates, strict=True), key=lambda item: item[0], reverse=True
+        )
 
         floor = self._settings.rerank_score_floor
         selected = [
@@ -209,7 +212,7 @@ class RetrievalService:
         query: str,
         filters: list[str] | None = None,
         k: int | None = None,
-        expander: Optional[Callable[[], list[str]]] = None,
+        expander: Callable[[], list[str]] | None = None,
     ) -> tuple[list[RetrievedChunk], list[str]]:
         """Latency-optimized: `expander` (an LLM call producing variants) runs
         CONCURRENTLY with the primary hybrid fetch, then variant fetches fan

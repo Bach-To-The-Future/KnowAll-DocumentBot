@@ -1,15 +1,16 @@
 import logging
 from enum import Enum
 from pathlib import Path
+
 from core.exceptions import UnsupportedFormatError
 from extraction.base import BaseExtractor
 from extraction.csv import ExtractCSV
-from extraction.excel import ExtractXLSX
-from extraction.txt import ExtractTXT
-from extraction.pdf import ExtractPDF
 from extraction.docx_format import ExtractDOCX
-from extraction.pptx import ExtractPPTX
+from extraction.excel import ExtractXLSX
 from extraction.helm import ExtractHELM
+from extraction.pdf import ExtractPDF
+from extraction.pptx import ExtractPPTX
+from extraction.txt import ExtractTXT
 
 logging.basicConfig(level=logging.INFO)
 
@@ -36,4 +37,5 @@ class ExtractStrategy(Enum):
         extractor_cls = cls.__members__.get(ext, None)
         if not extractor_cls:
             raise UnsupportedFormatError(f"No extractor for extension: {ext.lower() or '(none)'}")
-        return extractor_cls.value()
+        extractor: BaseExtractor = extractor_cls.value()
+        return extractor

@@ -5,9 +5,9 @@ these providers surface it (and its members) to routers. Tests override
 `get_container` — or construct services directly with fakes.
 """
 import hmac
-from typing import Optional
 
 from fastapi import Depends, Header, Request
+from starlette.applications import Starlette
 
 from core.config import Settings, get_settings
 from core.exceptions import AuthenticationError, AuthorizationError
@@ -20,8 +20,25 @@ from services.query import QueryService
 READONLY_PATH_PREFIXES = ("/query", "/list_documents", "/ingest/status", "/stats")
 
 
+def container_from_app(app: Starlette) -> ServiceContainer:
+    """Typed accessor for the container parked on app.state.
+
+    `app.state.<attr>` is typed `Any` by Starlette, so every call reached
+    through it silently loses type checking — including the lifespan warm-up,
+    where two `# type: ignore[attr-defined]` comments were reported by mypy as
+    *unused* precisely because nothing was being checked. The isinstance gate
+    turns that into a real, narrowed type at one chokepoint.
+    """
+    container = getattr(app.state, "container", None)
+    if not isinstance(container, ServiceContainer):
+        raise RuntimeError(
+            "ServiceContainer is not initialised; the app lifespan must run first."
+        )
+    return container
+
+
 def get_container(request: Request) -> ServiceContainer:
-    return request.app.state.container
+    return container_from_app(request.app)
 
 
 def get_settings_dep() -> Settings:
@@ -55,7 +72,7 @@ def _matches(candidate: str, secret: str) -> bool:
 
 def require_api_key(
     request: Request,
-    x_api_key: Optional[str] = Header(None),
+    x_api_key: str | None = Header(None),
     settings: Settings = Depends(get_settings_dep),
 ) -> None:
     """API_KEY grants full access; keys in API_QUERY_KEYS are limited to the

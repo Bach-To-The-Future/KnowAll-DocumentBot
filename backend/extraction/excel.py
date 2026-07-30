@@ -1,16 +1,17 @@
-import os
-import pandas as pd
-from typing import List
 import logging
+import os
+
+import pandas as pd
 from llama_index.core import Document
+
 from extraction.base import BaseExtractor
-from extraction.helper import generate_metadata, dynamic_rows_per_chunk
+from extraction.helper import dynamic_rows_per_chunk, generate_metadata
 
 logging.basicConfig(level=logging.INFO)
 
 
 class ExtractXLSX(BaseExtractor):
-    def extract_and_chunk(self, file_path: str) -> List[Document]:
+    def extract_and_chunk(self, file_path: str) -> list[Document]:
         """Row-group chunking per sheet: never sentence-split serialized
         tables; every chunk carries the sheet name and the header row."""
         if not self.validate_file(file_path):
@@ -21,7 +22,7 @@ class ExtractXLSX(BaseExtractor):
         ext = os.path.splitext(file_path)[-1][1:].lower()
 
         xl = pd.ExcelFile(file_path, engine="openpyxl")
-        all_nodes: List[Document] = []
+        all_nodes: list[Document] = []
 
         for sheet_name in xl.sheet_names:
             df = xl.parse(sheet_name)

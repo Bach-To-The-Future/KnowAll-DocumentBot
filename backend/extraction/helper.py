@@ -1,5 +1,5 @@
 import re
-from typing import Dict, Union, List
+
 from core.config import get_settings
 
 
@@ -20,26 +20,26 @@ def dynamic_rows_per_chunk(total_chars: int, num_rows: int) -> int:
         settings.table_chunk_char_budget // avg_row_len,
     ))
 
-def get_key(file: str, i: Union[int, str]) -> str:
+def get_key(file: str, i: int | str) -> str:
     """Generate a unique key from filename and index."""
     file = re.sub(r"[^a-zA-Z0-9]", "", file)
     return f"{file}_{i}"
 
 def generate_metadata(
     source: str,
-    index: Union[int, str],
-    max_index: Union[int, str],
+    index: int | str,
+    max_index: int | str,
     file_format: str,
-    page_number: int = None,
+    page_number: int | None = None,
     content_type: str = "text",
-    table_id: str = None,
-    figure_id: str = None,
-    headers: List[str] = None,
-    row_range: str = None,
-    sheet_name: str = None,
-    section_title: str = None,
+    table_id: str | None = None,
+    figure_id: str | None = None,
+    headers: list[str] | None = None,
+    row_range: str | None = None,
+    sheet_name: str | None = None,
+    section_title: str | None = None,
     **kwargs
-) -> Dict:
+) -> dict:
     """Generate standardized metadata for all document types."""
     metadata = {
         "source": source,

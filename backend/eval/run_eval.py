@@ -43,7 +43,7 @@ def evaluate(golden_path: str, k: int):
     settings = get_settings()
     retrieval = build_container(settings).retrieval
 
-    with open(golden_path, "r", encoding="utf-8") as f:
+    with open(golden_path, encoding="utf-8") as f:
         entries = json.load(f)["entries"]
 
     rows = []

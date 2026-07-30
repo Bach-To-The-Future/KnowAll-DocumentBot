@@ -18,3 +18,19 @@ src = ["backend"]
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B"]
 ignore = ["E501"]
+
+[tool.ruff.lint.flake8-bugbear]
+# B008 forbids function calls in argument defaults, which is exactly how
+# FastAPI declares dependencies and request parts. These calls are evaluated
+# once at import and are not mutable shared state, so they are declared
+# immutable rather than the rule being switched off — a blanket `ignore =
+# ["B008"]` would also hide the genuine mutable-default bugs B008 exists for.
+extend-immutable-calls = [
+    "fastapi.Depends",
+    "fastapi.File",
+    "fastapi.Header",
+    "fastapi.Body",
+    "fastapi.Query",
+    "fastapi.Path",
+    "fastapi.Form",
+]

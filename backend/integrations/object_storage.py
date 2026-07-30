@@ -1,7 +1,7 @@
 """MinIO/S3 object storage wrapper. All boto3 error types stop here."""
 import logging
 import threading
-from typing import Any, BinaryIO, Optional
+from typing import IO, Any
 
 import boto3
 from botocore.config import Config
@@ -17,7 +17,7 @@ class MinIOObjectStorage:
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
         self.bucket = settings.minio_bucket
-        self._client: Optional[Any] = None
+        self._client: Any | None = None
         self._lock = threading.Lock()
 
     def _s3(self) -> Any:
@@ -66,7 +66,7 @@ class MinIOObjectStorage:
             raise ObjectStorageError("Failed to stat object", detail=str(e)) from e
         return str(head.get("ETag", "")).strip('"')
 
-    def upload_fileobj(self, fileobj: BinaryIO, key: str) -> None:
+    def upload_fileobj(self, fileobj: IO[bytes], key: str) -> None:
         try:
             self._s3().upload_fileobj(fileobj, self.bucket, key)
         except Exception as e:

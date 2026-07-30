@@ -4,18 +4,29 @@ Services depend ONLY on these; integrations implement them. Tests inject
 fakes through the same seams (see tests/unit/fakes.py).
 """
 from abc import ABC, abstractmethod
-from typing import Any, AsyncIterator, Protocol, Sequence, runtime_checkable
+from collections.abc import AsyncIterator, Sequence
+from typing import Any, Protocol, runtime_checkable
 
 from models.schemas import ScoredChunk, VectorRecord
 
 
 @runtime_checkable
 class ChunkLike(Protocol):
-    """Anything extractors emit: needs text + mutable metadata. Kept as a
-    Protocol so core does not import llama_index (whose nodes satisfy it)."""
+    """Anything extractors emit. Kept as a Protocol so core does not import
+    llama_index (whose Document/TextNode satisfy it).
 
-    text: str
-    metadata: dict[str, Any]
+    Declared read-only: llama_index exposes `text` as a property, so a
+    mutable-attribute Protocol did not match and every extractor's return type
+    was reported incompatible. Consumers only READ `text` and MUTATE the dict
+    returned by `metadata` (ingestion sets chunk_seq/etag on it) — they never
+    rebind either attribute, so read-only is the accurate contract.
+    """
+
+    @property
+    def text(self) -> str: ...
+
+    @property
+    def metadata(self) -> dict[str, Any]: ...
 
 
 class DocumentExtractor(ABC):
@@ -36,13 +47,26 @@ class DenseEmbedder(ABC):
         """Query-task embedding (may apply model-specific prefixes + caching)."""
 
 
-class Reranker(ABC):
+class Warmable:
+    """Mixin (deliberately not an ABC — it has no abstract members).
+
+    Component that can pre-load heavyweight state (ONNX models) before
+    serving traffic. Declared on the interface so the lifespan warm-up is a
+    typed contract rather than an `Any` attribute lookup on app.state."""
+
+    def warm(self) -> None:
+        """Load lazily-initialised resources. No-op by default; safe to call
+        repeatedly and safe to call when nothing needs warming."""
+        return None
+
+
+class Reranker(Warmable, ABC):
     @abstractmethod
     def scores(self, query: str, texts: list[str]) -> list[float]:
         """Relevance in [0, 1], aligned 1:1 with `texts`."""
 
 
-class VectorStore(ABC):
+class VectorStore(Warmable, ABC):
     """Hybrid (dense + sparse) vector index. The sparse leg is an
     implementation detail of the store — callers pass raw query text."""
 

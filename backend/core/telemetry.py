@@ -10,8 +10,8 @@ import json
 import logging
 import time
 import uuid
+from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Iterator
 
 from core.interfaces import CacheStore
 

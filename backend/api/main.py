@@ -2,14 +2,14 @@
 the lifespan context manager; nothing connects at import time."""
 import logging
 import time
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import AsyncIterator
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
 
-from api.dependencies import require_api_key
+from api.dependencies import container_from_app, require_api_key
 from api.errors import register_exception_handlers
 from api.routers import documents, query, system
 from core.config import Settings, get_settings
@@ -53,11 +53,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         logger.error(f"LLM model '{settings.llm_model}' not available in Ollama at startup.")
 
     # Warm retrieval models (no-op when baked into the image); threadpool so
-    # a slow download doesn't block the event loop.
+    # a slow download doesn't block the event loop. `warm()` is declared on
+    # the Warmable interface, so these calls are type-checked rather than
+    # resolved through an `Any` attribute on app.state.
+    container = container_from_app(app)
     try:
-        container = app.state.container
-        await run_in_threadpool(container.vector_store.get_sparse_model)  # type: ignore[attr-defined]
-        await run_in_threadpool(container.reranker.warm)  # type: ignore[attr-defined]
+        await run_in_threadpool(container.vector_store.warm)
+        await run_in_threadpool(container.reranker.warm)
     except Exception as e:
         logger.error(f"Failed to warm retrieval models: {e}")
 
@@ -65,7 +67,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     # Release pooled httpx/OpenAI connections held by the LLM client.
     try:
-        await app.state.container.llm.aclose()
+        await container.llm.aclose()
     except Exception as e:
         logger.warning(f"LLM client shutdown failed: {e}")
     if app.state.arq_pool is not None:
