@@ -1,16 +1,29 @@
+# Secrets are mapped PER SERVICE. There is no global `env_file`, so no
+# container receives credentials it does not need (the web container used to
+# get MinIO/OpenAI keys; MinIO used to get the OpenAI key).
+# Values are interpolated from .env, which Compose loads automatically.
 services:
   # --- MinIO Object Storage ---
   minio:
     image: minio/minio:RELEASE.2025-03-12T18-04-18Z-cpuv1
     container_name: minio
-    env_file:
-      - ./.env
-    ports:
-      - "9000:9000"
-      - "9001:9001"
+    restart: unless-stopped
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?MINIO_ROOT_USER must be set}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD must be set}
+    # No published ports: MinIO is reachable only on the knowall-bot network.
+    # For temporary console access: docker compose run --rm -p 9001:9001 minio
+    expose:
+      - "9000"
+      - "9001"
     volumes:
       - minio_data:/minio/data
     command: minio server /minio/data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     networks:
       - knowall-bot
 
@@ -18,10 +31,22 @@ services:
   qdrant:
     image: qdrant/qdrant:v1.14.1
     container_name: qdrant
-    ports:
-      - "6333:6333"
+    restart: unless-stopped
+    # No published ports: Qdrant has no auth by default, and an exposed 6333
+    # allows unauthenticated DELETE of the whole collection.
+    expose:
+      - "6333"
+    environment:
+      # Defense in depth: even on the internal network, require the key.
+      QDRANT__SERVICE__API_KEY: ${QDRANT_API_KEY:?QDRANT_API_KEY must be set}
     volumes:
       - qdrant_data:/qdrant/storage
+    healthcheck:
+      # Image ships no curl/wget; bash /dev/tcp probes the HTTP port.
+      test: ["CMD-SHELL", "bash -c ':> /dev/tcp/127.0.0.1/6333' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     networks:
       - knowall-bot
 
@@ -29,8 +54,13 @@ services:
   ollama:
     image: ollama/ollama:0.9.3
     container_name: ollama
-    ports:
-      - "11434:11434"
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits: { memory: 6g }
+    # No published ports: an exposed 11434 is an open inference endpoint.
+    expose:
+      - "11434"
     volumes:
       - ollama_data:/root/.ollama
     entrypoint: >
@@ -41,45 +71,176 @@ services:
         ollama list | grep -q '^llama3.2:1b ' || ollama pull llama3.2:1b ;
         wait
       "
+    healthcheck:
+      # Healthy = server answering; model pulls may still be in flight
+      # (the API tolerates that: its startup model check is non-fatal).
+      test: ["CMD", "ollama", "list"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    networks:
+      - knowall-bot
+
+  # --- Redis (job queue + status store + distributed state) ---
+  redis:
+    image: redis:7-alpine
+    container_name: knowall-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - knowall-bot
+
+  # --- Ingestion Worker (arq) ---
+  worker:
+    build:
+      context: ./backend
+      dockerfile: api/Dockerfile
+    container_name: knowall-worker
+    restart: unless-stopped
+    command: arq worker.WorkerSettings
+    # Jobs can run for minutes; give the worker time to finish or record a
+    # failure before SIGKILL (default 10s left jobs stuck in "running").
+    stop_grace_period: 60s
+    deploy:
+      resources:
+        limits: { cpus: "2.0", memory: 4g }
+        reservations: { memory: 1g }
+    # Datastore credentials only: the worker serves no HTTP and needs no
+    # API_KEY / session secrets.
+    environment:
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+      MINIO_BUCKET: ${MINIO_BUCKET}
+      QDRANT_HOST: ${QDRANT_HOST}
+      QDRANT_PORT: ${QDRANT_PORT}
+      QDRANT_COLLECTION: ${QDRANT_COLLECTION}
+      QDRANT_API_KEY: ${QDRANT_API_KEY}
+      REDIS_URL: ${REDIS_URL}
+      OLLAMA_API_URL: ${OLLAMA_API_URL}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      USE_OPENAI_LLM: ${USE_OPENAI_LLM:-false}
+      USE_OPENAI_EMBEDDING: ${USE_OPENAI_EMBEDDING:-false}
+      RERANKER_MODEL: ${RERANKER_MODEL:-BAAI/bge-reranker-base}
+      ENABLE_OCR: ${ENABLE_OCR:-true}
+      INGEST_BATCH_SIZE: ${INGEST_BATCH_SIZE:-256}
+      MAX_CHUNKS_PER_DOCUMENT: ${MAX_CHUNKS_PER_DOCUMENT:-20000}
+      INGEST_JOB_TIMEOUT: ${INGEST_JOB_TIMEOUT:-1800}
+      WORKER_PROCESSES: ${WORKER_PROCESSES:-2}
+    depends_on:
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+      ollama:
+        condition: service_healthy
     networks:
       - knowall-bot
 
   # --- FastAPI Backend ---
   api:
     build:
-      context: .
-      dockerfile: app/api/Dockerfile
+      context: ./backend
+      dockerfile: api/Dockerfile
     container_name: knowall-api
+    restart: unless-stopped
     command: uvicorn api.main:app --host 0.0.0.0 --port 8000
-    env_file:
-      - ./.env
+    stop_grace_period: 30s
+    deploy:
+      resources:
+        limits: { cpus: "2.0", memory: 3g }
+        reservations: { memory: 512m }
+    # Datastore credentials + the API keys it validates. No SESSION_SECRET or
+    # AUTH_PASSWORD: browser auth is entirely the web tier's concern.
+    environment:
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+      MINIO_BUCKET: ${MINIO_BUCKET}
+      QDRANT_HOST: ${QDRANT_HOST}
+      QDRANT_PORT: ${QDRANT_PORT}
+      QDRANT_COLLECTION: ${QDRANT_COLLECTION}
+      QDRANT_API_KEY: ${QDRANT_API_KEY}
+      REDIS_URL: ${REDIS_URL}
+      OLLAMA_API_URL: ${OLLAMA_API_URL}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      USE_OPENAI_LLM: ${USE_OPENAI_LLM:-false}
+      USE_OPENAI_EMBEDDING: ${USE_OPENAI_EMBEDDING:-false}
+      RERANKER_MODEL: ${RERANKER_MODEL:-BAAI/bge-reranker-base}
+      ENABLE_OCR: ${ENABLE_OCR:-true}
+      API_KEY: ${API_KEY}
+      API_QUERY_KEYS: ${API_QUERY_KEYS}
+      RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-30}
+      MAX_CONCURRENT_QUERIES: ${MAX_CONCURRENT_QUERIES:-20}
+      MAX_QUEUE_DEPTH: ${MAX_QUEUE_DEPTH:-100}
+      INGEST_BATCH_SIZE: ${INGEST_BATCH_SIZE:-256}
+      MAX_CHUNKS_PER_DOCUMENT: ${MAX_CHUNKS_PER_DOCUMENT:-20000}
     ports:
       - "8000:8000"
     depends_on:
-      - minio
-      - qdrant
-      - ollama
-    # healthcheck:
-    #   test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-    #   interval: 10s
-    #   timeout: 5s
-    #   retries: 3
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+      ollama:
+        condition: service_healthy
+    healthcheck:
+      # Slim image has no curl; use the stdlib. start_period covers the
+      # fastembed model download on first boot.
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 180s
     networks:
       - knowall-bot
 
-  # --- Streamlit Frontend ---
-  streamlit:
+  # --- Next.js Web Frontend ---
+  web:
     build:
-      context: .
-      dockerfile: app/streamlit_ui/Dockerfile
-    container_name: knowall-ui
-    command: streamlit run streamlit_ui/streamlit_app.py --server.port=8501 --server.address=0.0.0.0
-    env_file:
-      - ./.env
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: knowall-web
+    restart: unless-stopped
+    stop_grace_period: 15s
+    deploy:
+      resources:
+        limits: { cpus: "1.0", memory: 512m }
+    # Browser-auth + backend-key material ONLY. No MinIO/Qdrant/OpenAI
+    # credentials ever reach this tier.
+    environment:
+      NODE_ENV: production
+      BACKEND_URL: ${BACKEND_URL}
+      API_KEY: ${API_KEY}
+      API_QUERY_KEY: ${API_QUERY_KEY}
+      SESSION_SECRET: ${SESSION_SECRET:?SESSION_SECRET must be >=32 chars}
+      AUTH_PASSWORD: ${AUTH_PASSWORD:?AUTH_PASSWORD must be set}
+      AUTH_REQUIRED: ${AUTH_REQUIRED:-true}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
     ports:
-      - "8501:8501"
+      - "3000:3000"
     depends_on:
-      - api
+      api:
+        condition: service_healthy
+    healthcheck:
+      # node:22 has global fetch; probe the app itself, not the backend.
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
     networks:
       - knowall-bot
 
@@ -90,6 +251,8 @@ volumes:
     name: minio_data
   ollama_data:
     name: ollama_data
+  redis_data:
+    name: redis_data
 
 networks:
   knowall-bot:

@@ -1,0 +1,144 @@
+"""Centralized, validated configuration.
+
+Every environment variable the system reads is declared here with a type and
+a default; pydantic-settings performs casting and validation at startup, so a
+malformed value fails fast instead of surfacing as a runtime type error.
+
+Access pattern: `get_settings()` (cached). FastAPI code paths receive the
+instance through dependency injection; tests construct `Settings(...)`
+directly or override the dependency.
+"""
+from functools import lru_cache
+from typing import Literal
+
+from pydantic import computed_field
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(
+        # Real env vars (compose env_file) win; the .env files serve local runs.
+        env_file=(".env", "../.env"),
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore",
+    )
+
+    # --- Ingestion pipeline ---
+    # Chunks embedded + upserted per batch. Bounds peak RAM: a document is no
+    # longer materialized as (all chunks + all embeddings + all payloads).
+    ingest_batch_size: int = 256
+    # Hard ceiling per document. Exceeding it fails the job loudly instead of
+    # letting the worker get OOM-killed mid-write.
+    max_chunks_per_document: int = 20_000
+    # Wall-clock ceiling per ingest job; enforced by killing the subprocess.
+    ingest_job_timeout: int = 1800
+    # Pending-queue depth at which uploads start shedding load with 503.
+    max_queue_depth: int = 100
+    # Subprocesses in the worker pool (CPU-bound extraction/embedding).
+    worker_processes: int = 2
+
+    # --- Chunking ---
+    chunk_size: int = 550
+    chunk_overlap: int = 100
+    table_chunk_char_budget: int = 1600  # ~400 tokens per table chunk
+    table_max_rows_per_chunk: int = 30
+
+    # --- Embeddings ---
+    use_openai_embedding: bool = False
+    openai_embed_model: str = "text-embedding-3-small"
+    ollama_embed_model: str = "nomic-embed-text:latest"
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def embed_model(self) -> str:
+        return self.openai_embed_model if self.use_openai_embedding else self.ollama_embed_model
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def embed_dim(self) -> int:
+        return 1536 if self.use_openai_embedding else 768
+
+    # --- LLM generation ---
+    use_openai_llm: bool = False
+    openai_llm_model: str = "gpt-4o-mini"
+    ollama_llm_model: str = "llama3.2:1b"
+    # 8192 fits k=5 section-expanded chunks + instructions + answer headroom.
+    llm_num_ctx: int = 8192
+    llm_temperature: float = 0.1
+    llm_num_predict: int = 1024
+    llm_read_timeout: int = 300  # CPU inference is slow, but never unbounded
+    openai_api_key: str | None = None
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def llm_model(self) -> str:
+        return self.openai_llm_model if self.use_openai_llm else self.ollama_llm_model
+
+    # --- External services ---
+    minio_endpoint: str = "localhost:9000"
+    minio_access_key: str | None = None
+    minio_secret_key: str | None = None
+    minio_bucket: str = "knowall"
+    qdrant_host: str = "localhost"
+    qdrant_port: int = 6333
+    qdrant_collection: str = "knowall_collection"
+    qdrant_api_key: str | None = None
+    # Internal Docker network is plaintext. Setting api_key alone makes
+    # qdrant-client assume TLS, so this must stay explicit.
+    qdrant_https: bool = False
+    qdrant_timeout: int = 15          # seconds; unset default hangs threads
+    s3_max_pool_connections: int = 50 # must exceed the request threadpool
+    s3_connect_timeout: int = 5
+    s3_read_timeout: int = 60         # large uploads/downloads stream through
+    ollama_api_url: str = "http://localhost:11434/api/"
+    # Durable ingestion queue + shared caches; None = in-process fallbacks.
+    redis_url: str | None = None
+
+    # --- OCR (scanned PDFs) ---
+    enable_ocr: bool = True
+    ocr_languages: str = "eng+fra"
+    ocr_dpi: int = 200
+
+    # --- Retrieval ---
+    sparse_model: str = "Qdrant/bm25"
+    reranker_model: str = "BAAI/bge-reranker-base"
+    retrieval_fetch_k: int = 20      # candidates fetched pre-rerank
+    rerank_top_n: int = 5            # chunks kept after reranking
+    rerank_score_floor: float = 0.25 # sigmoid floor; calibrate via eval/run_eval.py
+    # "section" = budgeted parent-section assembly, "window" = ±N chunks
+    retrieval_context_mode: Literal["section", "window", "off"] = "section"
+    neighbor_window: int = 1
+    parent_char_budget: int = 4000
+
+    # --- Conversation & query expansion ---
+    memory_max_turns: int = 5
+    enable_multi_query: bool = True
+    query_expansion_count: int = 2
+
+    # --- Answer cache ---
+    enable_answer_cache: bool = True
+    answer_cache_ttl: int = 3600
+
+    # --- API surface ---
+    api_key: str | None = None        # unset = auth disabled (dev mode)
+    api_query_keys: str = ""          # comma-separated read-only keys
+    rate_limit_per_minute: int = 30   # 0 = disabled, per identity per window
+    max_upload_bytes: int = 100 * 1024 * 1024  # mirrored at the Next.js proxy
+    # Admission control: hard ceiling on in-flight queries per replica.
+    max_concurrent_queries: int = 20
+    # X-User-Id / X-Forwarded-For are only trusted because reaching the API
+    # already requires a valid API key, held solely by the authenticated proxy.
+    trust_proxy_identity: bool = True
+
+    # Conversation memory TTL (seconds) — sessions expire, not evict.
+    session_ttl_seconds: int = 24 * 3600
+
+    @property
+    def query_keys(self) -> tuple[str, ...]:
+        return tuple(k.strip() for k in self.api_query_keys.split(",") if k.strip())
+
+
+@lru_cache
+def get_settings() -> Settings:
+    return Settings()

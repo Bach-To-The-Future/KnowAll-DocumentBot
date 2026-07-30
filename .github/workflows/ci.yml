@@ -1,0 +1,159 @@
+name: CI
+
+on:
+  push:
+    branches: [main, dock_contain]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  # A newer push supersedes an in-flight run on the same ref.
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Non-secret CI values. Real deployments source these from a secret store;
+  # they exist here only so the stack boots deterministically.
+  MINIO_ROOT_USER: ci_minio_user
+  MINIO_ROOT_PASSWORD: ci_minio_password
+  MINIO_ENDPOINT: minio:9000
+  MINIO_ACCESS_KEY: ci_minio_user
+  MINIO_SECRET_KEY: ci_minio_password
+  MINIO_BUCKET: knowall
+  QDRANT_HOST: qdrant
+  QDRANT_PORT: "6333"
+  QDRANT_COLLECTION: knowall_collection
+  QDRANT_API_KEY: ci-qdrant-key
+  OLLAMA_API_URL: http://ollama:11434/api/
+  REDIS_URL: redis://redis:6379/0
+  BACKEND_URL: http://api:8000
+  API_KEY: ci-admin-key
+  API_QUERY_KEY: ci-readonly-key
+  API_QUERY_KEYS: ci-readonly-key
+  SESSION_SECRET: ci-session-secret-at-least-32-chars-long
+  AUTH_PASSWORD: ci-password
+  AUTH_REQUIRED: "true"
+  COOKIE_SECURE: "false"
+
+jobs:
+  # ---------------------------------------------------------------- static --
+  frontend:
+    name: Frontend build + types
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      # `npm ci` requires a committed lockfile and installs it byte-for-byte.
+      # It fails the build if package.json and the lockfile disagree — which
+      # is exactly the supply-chain guarantee `npm install` does not give.
+      - run: npm ci
+      # `next build` runs tsc: this is what catches TS contract drift between
+      # types/api.ts and the FastAPI schemas.
+      - run: npm run build
+
+  backend:
+    name: Backend lint + types + unit tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/api/requirements.txt
+      - name: Install dependencies
+        # --require-hashes is implied when the file carries hashes, pinning
+        # the full transitive tree.
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r api/requirements.txt
+          pip install ruff mypy
+      - name: Ruff
+        run: ruff check --config ../pyproject.toml .
+      - name: Mypy
+        run: mypy --config-file ../pyproject.toml
+      - name: Unit tests
+        run: pytest -q
+
+  # ------------------------------------------------------------ integration --
+  e2e:
+    name: E2E (compose + Playwright)
+    runs-on: ubuntu-latest
+    needs: [frontend, backend]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Write .env for compose
+        # Compose interpolates from .env; secrets come from the job env above.
+        run: |
+          {
+            for key in MINIO_ROOT_USER MINIO_ROOT_PASSWORD MINIO_ENDPOINT \
+                       MINIO_ACCESS_KEY MINIO_SECRET_KEY MINIO_BUCKET \
+                       QDRANT_HOST QDRANT_PORT QDRANT_COLLECTION QDRANT_API_KEY \
+                       OLLAMA_API_URL REDIS_URL BACKEND_URL \
+                       API_KEY API_QUERY_KEY API_QUERY_KEYS \
+                       SESSION_SECRET AUTH_PASSWORD AUTH_REQUIRED COOKIE_SECURE; do
+              echo "${key}=${!key}"
+            done
+          } > .env
+
+      - name: Build images
+        run: docker compose build
+
+      # The stack is brought up without waiting on model pulls: the E2E suite
+      # stubs the backend at the proxy boundary, so it needs `web` healthy and
+      # `api` reachable, not a warm LLM.
+      - name: Start stack
+        run: docker compose up -d --wait --wait-timeout 600
+
+      - name: Stack diagnostics on failure
+        if: failure()
+        run: docker compose ps && docker compose logs --tail 100
+
+      - name: Run Playwright
+        run: |
+          docker run --rm --network knowall-bot-networks \
+            -e BASE_URL=http://knowall-web:3000 \
+            -e AUTH_PASSWORD=${AUTH_PASSWORD} \
+            -v "${{ github.workspace }}/frontend:/work" -w /work \
+            mcr.microsoft.com/playwright:v1.53.0-jammy \
+            bash -c "npm ci && npx playwright test"
+
+      - name: Upload Playwright artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-results
+          path: frontend/test-results/
+          retention-days: 7
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v
+
+  # ------------------------------------------------------------- security ---
+  security:
+    name: Image + dependency scan
+    runs-on: ubuntu-latest
+    needs: [frontend, backend]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build backend image
+        run: docker build -t knowall-api:ci -f backend/api/Dockerfile backend
+      - name: Trivy scan (fails on HIGH/CRITICAL)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: knowall-api:ci
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"

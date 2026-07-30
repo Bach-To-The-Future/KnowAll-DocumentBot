@@ -1,8 +1,33 @@
+# --- Python ---
 *__pycache__/
-*.env
 *.venv/
 *venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# --- Secrets ---
+*.env
+!.env.example
 *instructions.txt
+
+# --- Data / corpora (never commit source documents) ---
 *documents/
-*.ipynb
+!backend/eval/corpus/
 *minio_downloads/
+*.ipynb
+
+# --- Model weights & caches (fastembed / HuggingFace / ONNX) ---
+# These are baked into the image at build time; they must never enter git.
+models/
+.cache/huggingface/
+*.onnx
+*.safetensors
+*.gguf
+*.bin
+
+# --- Node / Next.js ---
+frontend/node_modules/
+frontend/.next/
+frontend/test-results/
+frontend/playwright-report/
