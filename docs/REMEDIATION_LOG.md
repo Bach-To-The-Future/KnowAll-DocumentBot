@@ -369,3 +369,101 @@ Notes: chose the port over declaring the dependency (maintainer preference:
 one HTTP stack). The client is now instance-scoped and pooled rather than
 `requests.post` opening a fresh connection per batch. Timeout made explicit
 (connect 5 / read 120 / write 30 / pool 5) instead of a bare `timeout=120`.
+
+
+## [Phase 1.4a] Corpus infrastructure + tier B
+Status: DONE (tier B only - tier A blocked, see PROPOSAL P-1)
+Change: Added eval/corpus/ with a manifest contract, an integrity gate, and 12
+synthetic tier-B documents covering every extractor path.
+Files: eval/corpus/MANIFEST.yaml, eval/corpus/verify.py,
+eval/corpus/generate_tier_b.py, eval/corpus/tier-b/ (12 files)
+Evidence:
+    verify.py      -> corpus OK: 12 documents verified (tier b: 12)
+                      manifest_sha256: 307e5d3b2060a9fd0cc5087a900f5a37a76d1d0c3f58dce4937ee0ebc27972e8
+    negative test  -> append 1 byte to b01 -> CORPUS VERIFICATION FAILED, exit 1
+Coverage (tier B): txt, md, csv, oversized-single-row csv, xlsx (multi-sheet),
+docx (headings + in-position table), pptx, pdf (text layer), pdf (image-only ->
+OCR path), plus 3 topical distractors with no answers.
+
+b04-wide-row.csv is the one that matters most: a ~13,000-char single row.
+dynamic_rows_per_chunk clamps with max(1, ...) (helper.py:18-21), so the row
+bypasses table_chunk_char_budget entirely, and finding #19's 2048-token
+embedding window then silently drops its tail. This turns that from a
+theoretical defect into a measurable one.
+
+Notes - A CLAIM I MADE AND THEN DISPROVED:
+  I asserted the generator was byte-deterministic. It is not. Measured by
+  running it twice and diffing:
+      byte-identical : .txt .md .csv .docx .pptx  (zip mtime normalisation works)
+      NOT identical  : .xlsx .pdf
+  openpyxl and PyMuPDF embed time-varying state that survived pinned docProps
+  timestamps and pinned CreationDate, ModDate and ID. I stopped chasing it
+  because byte-stable REGENERATION is not what protects a baseline - pinning the
+  COMMITTED bytes is, which the manifest + verify.py do. The module docstring
+  now states the measured behaviour rather than the intent.
+
+## PROPOSAL P-1 - tier A cannot be populated by me
+Status: PROPOSAL-PENDING (blocks 1.4 baseline, 1.5 golden set, 1.6 CI gate)
+
+What is blocked. Tier A is specified as REAL bilingual EN/FR parallel documents
+(Government of Canada, EU) with per-file license, source_url and retrieved
+provenance. I cannot produce it:
+
+ 1. I cannot fetch them. No network retrieval of arbitrary URLs is available to
+    me, and the instruction correctly rules out a fetch script.
+ 2. I must not substitute backend/documents/. It is gitignored and contains
+    third-party copyrighted material - ABC DELF junior A2.pdf is a commercial
+    language-exam textbook. Committing it would be a licensing violation, and I
+    could not write truthful license/source_url/retrieved fields for any file in
+    that directory.
+ 3. I will not author fake provenance. Synthesising Government of Canada
+    documents and labelling them with a gc.ca source_url would fabricate exactly
+    the evidence this engagement exists to establish.
+
+Options (maintainer decision required):
+  A. You supply tier A - drop real bilingual PDFs/DOCX into eval/corpus/tier-a/
+     with licence + URL + date; I write the manifest entries, checksums and
+     matched question pairs. Meets the spec exactly. PREFERRED.
+  B. I author synthetic EN/FR parallel documents, labelled license CC0-1.0,
+     source_url generated, tier a-synthetic. Removes the language/difficulty
+     confound (genuinely parallel content), but the headline baseline then
+     measures a synthetic corpus. Honest labelling, weaker claim.
+  C. Public-domain text reproduced from memory. Provenance unverifiable and
+     reproduction may be imperfect - NOT RECOMMENDED.
+
+Blast radius. Without tier A there is no headline baseline, so 1.5's golden set
+has no real documents to draw >=60 entries from, and 1.6's regression tolerance
+has no variance to measure. Tier B alone is adversarial by design and would
+produce a misleading headline.
+Rollback. None needed - nothing committed presumes tier A.
+What would settle it: your choice of A or B. If A, I need only the files plus
+their licence, URL and date.
+
+## F24 - the prescribed fix is NOT ACHIEVABLE (counter-proposal)
+Status: PROPOSAL-PENDING
+Finding ref: #24 (P1) - unpinned nomic-embed-text:latest
+
+Measured, not assumed:
+    /api/tags  -> nomic-embed-text:latest
+                  sha256:0a109f422b47e3a30ba2b10eca18548e944e8a23073ee3f3e947efcf3c45e59f
+               -> llama3.2:1b
+                  sha256:baf6a787fdffd633537aa2eb51cfd54cb93ff08e28040095462bb63daf552878
+    /api/show  -> NO digest field at all
+    ollama pull nomic-embed-text@sha256:0a109f422b47  ->  Error: invalid model name
+
+Ollama 0.9.3 cannot pull or run a model by digest. name:tag is the only
+reference form, so pin-to-a-digest cannot be implemented as written.
+
+Counter-proposal - pin by ASSERTION instead of by reference. The harm in F24 is
+not that the tag can move; it is that it can move UNDETECTABLY. That is fixable:
+ 1. Add expected_embed_model_digest to settings.
+ 2. On startup and at the top of every eval run, query /api/tags, compare, and
+    FAIL LOUDLY on mismatch instead of embedding with a silently different model.
+ 3. Record the digest in the baseline provenance tuple, so a baseline produced
+    under a republished model can never be silently diffed against an older one.
+ 4. Combined with F2 (embed_model in the payload), a drifted model becomes
+    detectable at ingest, at query time and at eval time.
+
+This delivers F24's actual requirement - zero silent drift - without depending on
+a capability Ollama does not have. Needs approval because it changes startup
+behaviour from permissive to fail-closed.

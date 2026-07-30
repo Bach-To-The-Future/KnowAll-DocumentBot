@@ -1,0 +1,3 @@
+Training Catalogue
+Introductory workshops run monthly for new analysts.
+Advanced modules require completion of the introductory track.

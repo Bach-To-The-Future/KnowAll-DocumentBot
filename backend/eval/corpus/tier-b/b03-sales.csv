@@ -1,0 +1,17 @@
+region,quarter,units_sold,revenue_cad
+North,Q1,100,1200
+North,Q2,107,1284
+North,Q3,114,1368
+North,Q4,121,1452
+South,Q1,128,1536
+South,Q2,135,1620
+South,Q3,142,1704
+South,Q4,149,1788
+East,Q1,156,1872
+East,Q2,163,1956
+East,Q3,170,2040
+East,Q4,177,2124
+West,Q1,184,2208
+West,Q2,191,2292
+West,Q3,198,2376
+West,Q4,205,2460
