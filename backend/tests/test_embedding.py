@@ -1,8 +1,11 @@
 """Manual smoke test for the Ollama embedding endpoint (batched /api/embed —
-the /api/embeddings endpoint the app used previously is deprecated)."""
-import requests
+the /api/embeddings endpoint the app used previously is deprecated).
 
-resp = requests.post(
+Run inside the api container: python tests/test_embedding.py
+"""
+import httpx
+
+resp = httpx.post(
     "http://ollama:11434/api/embed",
     json={"model": "nomic-embed-text", "input": ["hello world", "second text"]},
     timeout=60,

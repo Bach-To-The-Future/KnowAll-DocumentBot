@@ -8,8 +8,8 @@ import logging
 import threading
 from collections import OrderedDict
 
+import httpx
 import openai
-import requests
 
 from core.config import Settings
 from core.exceptions import EmbeddingError
@@ -59,19 +59,25 @@ class OllamaEmbedder(_QueryCachingEmbedder):
     def __init__(self, settings: Settings) -> None:
         super().__init__(settings.embed_model)
         self._embed_url = f"{settings.ollama_api_url}embed"  # batched endpoint
+        # One HTTP stack for the whole service (llm_clients already uses
+        # httpx). `requests` was imported here but never declared as a
+        # dependency — it resolved only transitively via fastembed ->
+        # huggingface_hub, so a change in that chain would have broken
+        # embedding at runtime.
+        self._client = httpx.Client(timeout=httpx.Timeout(connect=5.0, read=120.0,
+                                                          write=30.0, pool=5.0))
 
     def _embed_batch(self, texts: list[str]) -> list[list[float]]:
         embeddings: list[list[float]] = []
         for start in range(0, len(texts), EMBED_BATCH_SIZE):
             batch = texts[start:start + EMBED_BATCH_SIZE]
             try:
-                response = requests.post(
+                response = self._client.post(
                     self._embed_url,
                     json={"model": self._model, "input": batch},
-                    timeout=120,
                 )
                 response.raise_for_status()
-            except requests.RequestException as e:
+            except httpx.HTTPError as e:
                 raise EmbeddingError(
                     f"Ollama embedding request failed for batch starting at {start}",
                     detail=str(e),

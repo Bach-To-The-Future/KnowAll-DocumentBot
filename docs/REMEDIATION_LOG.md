@@ -349,3 +349,23 @@ Notes — decisions worth knowing:
     types (3), both third-party stub limitations, plus 3 in tests and 1 in
     `ingestion.py:157`.
   - F24 (pytest cache permission warning) still present; cosmetic, deferred.
+
+## [Phase 1.3] Port embeddings.py off `requests` to httpx
+Status: DONE
+Finding ref: #8 (verdict: CONFIRMED)
+Change: Replaced the undeclared `requests` dependency with the pooled
+`httpx.Client` the rest of the service already uses.
+Files: `integrations/embeddings.py:7-12,60-70,78-90`, `tests/test_embedding.py`
+Evidence:
+```
+grep -rn "^import requests" backend  →  no matches
+ruff / mypy                          →  clean
+pytest -q (container)                →  53 passed
+python tests/test_embedding.py       →  200, 2 embeddings, dim=768   (live)
+```
+Eval: n/a — same endpoint, same payload, same prefixes.
+Commit: see below
+Notes: chose the port over declaring the dependency (maintainer preference:
+one HTTP stack). The client is now instance-scoped and pooled rather than
+`requests.post` opening a fresh connection per batch. Timeout made explicit
+(connect 5 / read 120 / write 30 / pool 5) instead of a bare `timeout=120`.
