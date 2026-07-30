@@ -1,10 +1,13 @@
-# All tooling runs in Docker (no host Node required). Dependency versions are
-# pinned exactly in package.json; the first build materializes the lockfile
-# inside the layer only.
+# All tooling runs in Docker (no host Node required). package-lock.json is
+# committed and authoritative: `npm ci` installs it byte-for-byte and FAILS if
+# it disagrees with package.json, which is the reproducibility guarantee
+# `npm install` cannot give. Regenerate it only in this same base image
+# (node:22-alpine) — a lockfile built on glibc omits the musl optional
+# binaries that lightningcss/oxide/swc need here.
 FROM node:22-alpine AS deps
 WORKDIR /app
-COPY package.json ./
-RUN npm install --no-audit --no-fund
+COPY package.json package-lock.json ./
+RUN npm ci --no-audit --no-fund
 
 FROM node:22-alpine AS build
 WORKDIR /app

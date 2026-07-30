@@ -204,3 +204,97 @@ evidence.
 satisfy R4. Phase 1.1 additionally requires deleting the polluted host
 `node_modules` (F22) before generating a lockfile — otherwise the lockfile
 captures glibc-only optional dependencies.
+
+---
+
+# Section 1 — Phase 1: Restore the Safety Net
+
+## Backlog amendments (directed by maintainer, 2026-07-14)
+
+- **F19 re-graded ⚠️ → P1, moved to Phase 2**, merged with **F3** under a single
+  shared token-counting utility enforced at BOTH boundaries: the 2048-token
+  embedding window (F19) and the 8192-token generation context (F3).
+- **F23 (P2) added** — `app.state.container` is typed `Any`, which disables type
+  checking at every call site reached through it (this is also why the
+  `main.py:59-60` ignores read as "unused" — see 0.3). Fix in 1.2 via a typed
+  accessor.
+- **F24** — renumbered from the F23 assigned in Section 0 (pytest cache
+  permission warning), to free F23 for the maintainer's finding.
+- **Phase 3 reordered**: `recall_at_fetch` measurement first; HNSW/`ef` tuning
+  last and deferred until the corpus exceeds the indexing threshold.
+- **1.4 blocked** until `eval/corpus/` is defined with checksums + manifest.
+
+## [Phase 0.x] Baseline commit (PROPOSAL P-0 — APPROVED)
+Status: DONE
+Finding ref: #21 (verdict: CONFIRMED — entire architecture uncommitted)
+Change: Tagged prior HEAD `pre-refactor-streamlit`; committed the current tree
+as one untested snapshot; hardened `.gitignore`.
+Files: `.gitignore`, 143 staged paths
+Evidence: `git log` → `0bf2874`; `git status --short` → 0 entries (clean tree);
+`git check-ignore` verified for `.env`, `node_modules/**`, `.pytest_cache/**`,
+`documents/**`, `*.onnx`, `*.safetensors`; `.env.example` explicitly un-ignored.
+Commit: `0bf2874 chore: baseline enterprise architecture snapshot (UNTESTED)`
+Notes: Two surprises during the `git add -An` review, both reported before
+committing:
+  1. `.gitignore` did **not** cover `.pytest_cache` (it was only self-ignored by
+     pytest's own generated `.gitignore`) nor any model-weight pattern. Both added.
+  2. A `frontend/package-lock.json` **existed**, created by my own Phase 0
+     `npm install` inside a glibc container. It contained gnu-only
+     `lightningcss`/`oxide` entries (77 packages). Deleted together with
+     `node_modules` and regenerated in 1.1.
+Gates at commit time were RED by design (ruff 105 / mypy 26); 1.2 turns them green.
+
+## [Phase 1.1] Lockfiles
+Status: DONE
+Finding ref: #1 (verdict: CONFIRMED), #22 (verdict: CONFIRMED)
+Change: Generated platform-complete `frontend/package-lock.json` and a
+hash-pinned `backend/api/requirements.txt` compiled from a new
+`requirements.in`; switched the frontend Dockerfile to `npm ci`.
+Files: `frontend/package-lock.json` (new), `frontend/Dockerfile:1-11`,
+`backend/api/requirements.in` (renamed from requirements.txt),
+`backend/api/requirements.txt` (now generated)
+Evidence:
+  - Lockfile generated in `node:22-alpine` via `npm install --package-lock-only`
+    (no node_modules materialized). **127 packages**, and platform coverage
+    verified to include BOTH variants for every native dep:
+    `lightningcss-linux-x64-{gnu,musl}`, `@tailwindcss/oxide-linux-x64-{gnu,musl}`,
+    `@next/swc-linux-x64-{gnu,musl}`. The polluted lockfile had 77 packages and
+    gnu-only entries.
+  - `docker compose build web` → `npm ci` → `added 74 packages in 32s` →
+    `✓ Compiled successfully in 7.0s`. **This is the first time `npm ci` has
+    ever succeeded in this repo.**
+  - `uv pip compile api/requirements.in --generate-hashes` → **124 pinned
+    packages, 2703 hashes**.
+  - `docker compose build api` → `Successfully installed …` (124 packages)
+    under pip's implicit `--require-hashes`. BUILD_OK.
+  - `docker compose up -d --wait` → 7/7 healthy on the new images.
+Eval: n/a (no retrieval behavior touched)
+Commit: see below
+Notes:
+  - CI `cache-dependency-path` values (`frontend/package-lock.json`,
+    `backend/api/requirements.txt`) now both resolve to real files.
+  - The compiled lockfile pins `requests==2.34.2` transitively, but F8 still
+    stands: `integrations/embeddings.py:12` imports it as a **direct**
+    dependency without declaring it. 1.3 addresses that.
+  - `tiktoken==0.13.0` arrives transitively via llama-index-core — available
+    for Phase 2.2, though llama3.2 does not use a tiktoken BPE (see 2.2).
+  - **Deviation from R4 acknowledged:** this commit does not leave ruff/mypy
+    green, because it precedes 1.2 by design. Recorded rather than hidden.
+
+## [Phase 3 gate] Corpus scale measured (directed)
+Status: DONE (measurement only)
+Change: none — read-only verification.
+Evidence: live Qdrant `knowall_collection`:
+```
+points_count          : 376
+indexed_vectors_count : 372
+full_scan_threshold   : 10000   (KB, Qdrant default)
+segments status       : green
+hnsw                  : m=16 ef_construct=100 on_disk=False
+```
+372 × 768 dims × 4 B ≈ **1.1 MB**, far below the 10 000 KB full-scan threshold.
+**Conclusion: HNSW/`ef` tuning is not measurable at this corpus size** — Qdrant
+prefers full scan for segments under the threshold, so `m`/`ef_construct`/`ef`
+changes would produce no observable delta. Phase 3.1 (HNSW) should stay deferred
+until the corpus exceeds the threshold by a wide margin; `recall_at_fetch` is
+the correct first measurement.
