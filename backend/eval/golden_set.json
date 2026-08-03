@@ -2,175 +2,445 @@
   "_schema": {
     "question": "the query to run",
     "language": "en | fr",
-    "answerable": "false = the corpus cannot answer this; correct behavior is abstention (empty retrieval)",
+    "answerable": "false = the corpus cannot answer this; correct behaviour is abstention (empty retrieval)",
+    "tier": "a | b — must match the document's tier in eval/corpus/MANIFEST.yaml. Metrics are reported per tier and never averaged",
+    "category": "plain-fact | table-answer | ocr-answer | multi-hop | cross-doc | long-table-tail | conversational | unanswerable",
     "expected_sources": "files (basenames) a relevant chunk must come from",
     "expected_keywords": "a retrieved chunk counts as relevant if its source matches AND any keyword appears (case-insensitive); empty list = source match alone suffices",
+    "answer_snippet": "VERBATIM text from the source document that answers the question. Required for answerable entries. It defines the lexical-overlap slice, so it must be copied from the document, never from retrieval output",
+    "history": "optional prior turns [{question, answer}] seeded into session memory in full mode; drives the needs_rewrite() branch",
+    "expects_rewrite": "the needs_rewrite() verdict this entry must produce. A mismatch FAILS the eval run — that is how a widened anaphora regex is caught before it silently rewrites standalone questions",
     "note": "optional context for humans"
   },
   "entries": [
     {
-      "question": "What are the core components of Hadoop?",
+      "question": "How long must files be kept before they may be destroyed?",
       "language": "en",
       "answerable": true,
-      "expected_sources": ["Data Engineer Concepts.docx"],
-      "expected_keywords": ["HDFS", "MapReduce", "Yarn"]
+      "tier": "b",
+      "category": "plain-fact",
+      "expected_sources": [
+        "b01-policy-notes.txt"
+      ],
+      "expected_keywords": [
+        "seven years"
+      ],
+      "answer_snippet": "Records are retained for seven years from the date of creation.",
+      "expects_rewrite": false,
+      "note": "deliberately avoids 'records' and 'retained'"
     },
     {
-      "question": "What is the difference between horizontal and vertical scaling in Hadoop?",
+      "question": "After what delay does an open case reach the duty supervisor?",
       "language": "en",
       "answerable": true,
-      "expected_sources": ["Data Engineer Concepts.docx"],
-      "expected_keywords": ["Horizontal Scaling", "Vertical Scaling", "Scale up", "Scale down"]
+      "tier": "b",
+      "category": "plain-fact",
+      "expected_sources": [
+        "b02-handbook.md"
+      ],
+      "expected_keywords": [
+        "72 hours"
+      ],
+      "answer_snippet": "Unresolved incidents escalate to the duty supervisor after 72 hours.",
+      "expects_rewrite": false
     },
     {
-      "question": "Which Hadoop ecosystem tool is used for SQL and which for scheduling jobs?",
+      "question": "When does a badge stop working for someone who never uses it?",
       "language": "en",
       "answerable": true,
-      "expected_sources": ["Data Engineer Concepts.docx"],
-      "expected_keywords": ["Hive", "Oozie"]
+      "tier": "b",
+      "category": "plain-fact",
+      "expected_sources": [
+        "b06-operations.docx"
+      ],
+      "expected_keywords": [
+        "30 days"
+      ],
+      "answer_snippet": "Badge access is revoked automatically after 30 days of inactivity.",
+      "expects_rewrite": false,
+      "note": "'it' is anaphoric-looking but there is NO history, so branch 1 must skip"
     },
     {
-      "question": "What does Delta Lake add on top of a data lake?",
+      "question": "What proportion of customers left during the quarter?",
       "language": "en",
       "answerable": true,
-      "expected_sources": ["Databricks Certification.docx"],
-      "expected_keywords": ["ACID", "time travel", "Schema enforcement"]
+      "tier": "b",
+      "category": "plain-fact",
+      "expected_sources": [
+        "b07-review.pptx"
+      ],
+      "expected_keywords": [
+        "3.1"
+      ],
+      "answer_snippet": "Customer churn fell to 3.1 percent.",
+      "expects_rewrite": false
     },
     {
-      "question": "What is the difference between an interactive cluster and a job cluster in Databricks?",
+      "question": "What revenue did the West region record in Q4?",
       "language": "en",
       "answerable": true,
-      "expected_sources": ["Mastering the Cloud.docx"],
-      "expected_keywords": ["cluster UI", "spins up", "exploratory"]
+      "tier": "b",
+      "category": "table-answer",
+      "expected_sources": [
+        "b03-sales.csv"
+      ],
+      "expected_keywords": [
+        "2460"
+      ],
+      "answer_snippet": "West,Q4,205,2460",
+      "expects_rewrite": false
     },
     {
-      "question": "Can Databricks be managed using PowerShell?",
+      "question": "At what stock level should a replenishment order be raised?",
       "language": "en",
       "answerable": true,
-      "expected_sources": ["Mastering the Cloud.docx"],
-      "expected_keywords": ["PowerShell"]
+      "tier": "b",
+      "category": "table-answer",
+      "expected_sources": [
+        "b05-inventory.xlsx"
+      ],
+      "expected_keywords": [
+        "25"
+      ],
+      "answer_snippet": "reorder_point,25",
+      "expects_rewrite": false,
+      "note": "second sheet of a multi-sheet workbook"
     },
     {
-      "question": "What is the difference between an instance and a cluster in Databricks?",
+      "question": "How many hours long is the billing maintenance window?",
       "language": "en",
       "answerable": true,
-      "expected_sources": ["Mastering the Cloud.docx"],
-      "expected_keywords": ["Virtual machine", "group of instances"]
+      "tier": "b",
+      "category": "table-answer",
+      "expected_sources": [
+        "b06-operations.docx"
+      ],
+      "expected_keywords": [
+        "billing"
+      ],
+      "answer_snippet": "system window_hours billing 4 reporting 2",
+      "expects_rewrite": false,
+      "note": "table inside a docx, not a spreadsheet"
     },
     {
-      "question": "What is the difference between OLTP and OLAP?",
+      "question": "How much notice is needed to end contract CT-9001?",
       "language": "en",
       "answerable": true,
-      "expected_sources": ["Unit1-Databricks-review-bigdata-concept.pdf"],
-      "expected_keywords": ["OLTP", "OLAP"]
+      "tier": "b",
+      "category": "long-table-tail",
+      "expected_sources": [
+        "b04-wide-row.csv"
+      ],
+      "expected_keywords": [
+        "95 days"
+      ],
+      "answer_snippet": "The termination notice period is 95 days.",
+      "expects_rewrite": false,
+      "note": "answer sits after 1200 filler tokens; tests that the tail survives chunking"
     },
     {
-      "question": "Which machine learning algorithm can be used for both regression and classification?",
+      "question": "What is the indemnity ceiling on contract CT-9001?",
       "language": "en",
       "answerable": true,
-      "expected_sources": ["Machine Learning Algorithms.docx"],
-      "expected_keywords": ["Nearest Neighbors", "KNN"]
+      "tier": "b",
+      "category": "long-table-tail",
+      "expected_sources": [
+        "b04-wide-row.csv"
+      ],
+      "expected_keywords": [
+        "4200000"
+      ],
+      "answer_snippet": "The indemnity ceiling is 4200000 CAD.",
+      "expects_rewrite": false,
+      "note": "head of the same over-long row — pairs with the tail question"
     },
     {
-      "question": "How does logistic regression predict outcomes?",
+      "question": "What is the maximum award available under the heritage programme?",
       "language": "en",
       "answerable": true,
-      "expected_sources": ["Machine Learning Algorithms.docx"],
-      "expected_keywords": ["Sigmoid", "categorical"]
+      "tier": "b",
+      "category": "ocr-answer",
+      "expected_sources": [
+        "b09-scanned-notice.pdf"
+      ],
+      "expected_keywords": [
+        "75000"
+      ],
+      "answer_snippet": "The heritage grant ceiling is 75000 dollars.",
+      "expects_rewrite": false,
+      "note": "image-only PDF, no text layer — reachable only through OCR"
     },
     {
-      "question": "What is minimized when fitting a linear regression model?",
-      "language": "en",
-      "answerable": true,
-      "expected_sources": ["Machine Learning Algorithms.docx"],
-      "expected_keywords": ["squared residuals"]
-    },
-    {
-      "question": "When should you choose AWS Glue over Apache Airflow for ETL orchestration?",
-      "language": "en",
-      "answerable": true,
-      "expected_sources": ["Interview Questions.docx"],
-      "expected_keywords": ["Glue", "Airflow"]
-    },
-    {
-      "question": "What tools can be used to monitor data quality and integrity in pipelines?",
-      "language": "en",
-      "answerable": true,
-      "expected_sources": ["Interview Questions.docx", "Data quality.txt"],
-      "expected_keywords": ["CloudWatch", "SNS", "sampling", "hash"]
-    },
-    {
-      "question": "What are the stages of a data pipeline?",
-      "language": "en",
-      "answerable": true,
-      "expected_sources": ["System Design Concepts.docx"],
-      "expected_keywords": ["Ingest", "Transform", "Collect"]
-    },
-    {
-      "question": "Which file formats are commonly used to store data in pipelines?",
-      "language": "en",
-      "answerable": true,
-      "expected_sources": ["System Design Concepts.docx"],
-      "expected_keywords": ["parquet", "avro"]
-    },
-    {
-      "question": "Comment dit-on 'Hello' en français ?",
+      "question": "Jusqu'a quelle date les dossiers peuvent-ils etre deposes ?",
       "language": "fr",
       "answerable": true,
-      "expected_sources": ["French Vocabulaire.xlsx"],
-      "expected_keywords": ["Bonjour"]
+      "tier": "b",
+      "category": "ocr-answer",
+      "expected_sources": [
+        "b13-avis-archive-fr.pdf"
+      ],
+      "expected_keywords": [
+        "31 mars"
+      ],
+      "answer_snippet": "Les demandes doivent etre soumises avant le 31 mars.",
+      "expects_rewrite": false,
+      "note": "French image-only PDF — exercises the fra traineddata"
     },
     {
-      "question": "Quelle préposition utilise-t-on pour dire qu'un objet est sur la table ?",
-      "language": "fr",
-      "answerable": true,
-      "expected_sources": ["French Vocabulaire.xlsx"],
-      "expected_keywords": ["sur la table"]
-    },
-    {
-      "question": "How do you ask someone's age in French?",
-      "language": "fr",
-      "answerable": true,
-      "expected_sources": ["French Vocabulaire.xlsx"],
-      "expected_keywords": ["Quel âge avez-vous"]
-    },
-    {
-      "question": "What columns does the advertising dataset contain?",
+      "question": "How much time passes in total between discovery and supervisor involvement?",
       "language": "en",
       "answerable": true,
-      "expected_sources": ["advertising.csv"],
-      "expected_keywords": ["Ad Topic Line", "Daily Internet Usage"]
+      "tier": "b",
+      "category": "multi-hop",
+      "expected_sources": [
+        "b02-handbook.md"
+      ],
+      "expected_keywords": [
+        "72 hours",
+        "24 hours"
+      ],
+      "answer_snippet": "Incidents must be reported within 24 hours of discovery. Unresolved incidents escalate to the duty supervisor after 72 hours.",
+      "expects_rewrite": false,
+      "note": "answer spans two sections of one document"
     },
     {
-      "question": "How can data quality be verified on incremental loads?",
+      "question": "Are incident write-ups kept, and for how long?",
       "language": "en",
       "answerable": true,
-      "expected_sources": ["Data quality.txt"],
-      "expected_keywords": ["hash", "incremental", "sampling"]
+      "tier": "b",
+      "category": "cross-doc",
+      "expected_sources": [
+        "b01-policy-notes.txt",
+        "b02-handbook.md"
+      ],
+      "expected_keywords": [
+        "seven years",
+        "reported"
+      ],
+      "answer_snippet": "Records are retained for seven years from the date of creation. Incidents must be reported within 24 hours of discovery.",
+      "expects_rewrite": false,
+      "note": "needs a chunk from each of two documents"
     },
     {
-      "question": "What is the capital of Australia?",
+      "question": "Which day of the month is reserved for planned downtime?",
+      "language": "en",
+      "answerable": true,
+      "tier": "b",
+      "category": "conversational",
+      "history": [],
+      "expects_rewrite": false,
+      "expected_sources": [
+        "b06-operations.docx"
+      ],
+      "expected_keywords": [
+        "second Sunday"
+      ],
+      "answer_snippet": "Scheduled maintenance occurs on the second Sunday monthly.",
+      "note": "BRANCH 1 - no history: rewrite must be skipped however the question reads"
+    },
+    {
+      "question": "Quel est le montant maximal accorde par ce programme patrimonial ?",
+      "language": "fr",
+      "answerable": true,
+      "tier": "b",
+      "category": "conversational",
+      "history": [],
+      "expects_rewrite": false,
+      "expected_sources": [
+        "b13-avis-archive-fr.pdf"
+      ],
+      "expected_keywords": [
+        "75000"
+      ],
+      "answer_snippet": "Le plafond de la subvention est de 75000 dollars.",
+      "note": "BRANCH 1 (fr) - contains 'ce', an anaphor, but no history: must skip"
+    },
+    {
+      "question": "And the disposal rule?",
+      "language": "en",
+      "answerable": true,
+      "tier": "b",
+      "category": "conversational",
+      "history": [
+        {
+          "question": "What does the retention policy cover?",
+          "answer": "It sets how long records are kept and who authorises disposal."
+        }
+      ],
+      "expects_rewrite": true,
+      "expected_sources": [
+        "b01-policy-notes.txt"
+      ],
+      "expected_keywords": [
+        "records officer"
+      ],
+      "answer_snippet": "Disposal requires written authorisation from the records officer.",
+      "note": "BRANCH 2 - 4 words with history: short-circuit fires before the regex"
+    },
+    {
+      "question": "Et le stock de securite ?",
+      "language": "fr",
+      "answerable": true,
+      "tier": "b",
+      "category": "conversational",
+      "history": [
+        {
+          "question": "What does the thresholds sheet list?",
+          "answer": "It lists the reorder point and the safety stock."
+        }
+      ],
+      "expects_rewrite": true,
+      "expected_sources": [
+        "b05-inventory.xlsx"
+      ],
+      "expected_keywords": [
+        "15"
+      ],
+      "answer_snippet": "safety_stock,15",
+      "note": "BRANCH 2 (fr) - 5 words with history: short-circuit"
+    },
+    {
+      "question": "How long does it take before that reaches the duty supervisor?",
+      "language": "en",
+      "answerable": true,
+      "tier": "b",
+      "category": "conversational",
+      "history": [
+        {
+          "question": "What is the incident reporting deadline?",
+          "answer": "Incidents must be reported within 24 hours of discovery."
+        }
+      ],
+      "expects_rewrite": true,
+      "expected_sources": [
+        "b02-handbook.md"
+      ],
+      "expected_keywords": [
+        "72 hours"
+      ],
+      "answer_snippet": "Unresolved incidents escalate to the duty supervisor after 72 hours.",
+      "note": "BRANCH 3 - long, history present, 'it'/'that' hit the regex"
+    },
+    {
+      "question": "Est-ce que cette limite vaut aussi pour les demandes tardives ?",
+      "language": "fr",
+      "answerable": true,
+      "tier": "b",
+      "category": "conversational",
+      "history": [
+        {
+          "question": "De quoi traite l'avis archive ?",
+          "answer": "Il porte sur le plafond de la subvention patrimoniale."
+        }
+      ],
+      "expects_rewrite": true,
+      "expected_sources": [
+        "b13-avis-archive-fr.pdf"
+      ],
+      "expected_keywords": [
+        "75000"
+      ],
+      "answer_snippet": "Le plafond de la subvention est de 75000 dollars.",
+      "note": "BRANCH 3 (fr) - long, history present, 'cette' hits the regex"
+    },
+    {
+      "question": "What stock level triggers a replenishment order for the Halifax warehouse?",
+      "language": "en",
+      "answerable": true,
+      "tier": "b",
+      "category": "conversational",
+      "history": [
+        {
+          "question": "What does the retention policy cover?",
+          "answer": "It sets how long records are kept and who authorises disposal."
+        }
+      ],
+      "expects_rewrite": false,
+      "expected_sources": [
+        "b05-inventory.xlsx"
+      ],
+      "expected_keywords": [
+        "25"
+      ],
+      "answer_snippet": "reorder_point,25",
+      "note": "BRANCH 4 (NEGATIVE, the important one) - long, history present, no anaphor: must NOT rewrite. A widened regex over-triggers here first."
+    },
+    {
+      "question": "Quelle est la periode de preavis prevue au contrat CT-9001 ?",
+      "language": "fr",
+      "answerable": true,
+      "tier": "b",
+      "category": "conversational",
+      "history": [
+        {
+          "question": "De quoi traite l'avis archive ?",
+          "answer": "Il porte sur le plafond de la subvention patrimoniale."
+        }
+      ],
+      "expects_rewrite": false,
+      "expected_sources": [
+        "b04-wide-row.csv"
+      ],
+      "expected_keywords": [
+        "95 days"
+      ],
+      "answer_snippet": "The termination notice period is 95 days.",
+      "note": "BRANCH 4 (fr NEGATIVE) - also pins the word-boundary behaviour: 'Quelle' contains 'elle' and must not match \\belle\\b."
+    },
+    {
+      "question": "Combien de temps faut-il pour accuser reception d'un billet prioritaire ?",
+      "language": "fr",
+      "answerable": true,
+      "tier": "b",
+      "category": "conversational",
+      "history": [
+        {
+          "question": "De quoi traite l'avis archive ?",
+          "answer": "Il porte sur le plafond de la subvention patrimoniale."
+        }
+      ],
+      "expects_rewrite": true,
+      "expected_sources": [
+        "b08-sla.pdf"
+      ],
+      "expected_keywords": [
+        "15 minutes"
+      ],
+      "answer_snippet": "Priority one tickets are acknowledged within 15 minutes.",
+      "note": "BRANCH 3 (fr) - 'faut-il' matches \\bil\\b across the hyphen. Recorded because it is a true positive that reads like a false one."
+    },
+    {
+      "question": "How many parking permits were issued last September?",
       "language": "en",
       "answerable": false,
+      "tier": "b",
+      "category": "unanswerable",
       "expected_sources": [],
       "expected_keywords": [],
-      "note": "Out-of-corpus: correct behavior is abstention."
+      "expects_rewrite": false,
+      "note": "b12 mentions permits and September but states no count — a near miss, not a gap"
     },
     {
-      "question": "How do I configure a Kubernetes ingress controller?",
+      "question": "What is the annual budget for the advanced training modules?",
       "language": "en",
       "answerable": false,
+      "tier": "b",
+      "category": "unanswerable",
       "expected_sources": [],
       "expected_keywords": [],
-      "note": "Out-of-corpus but domain-adjacent: hardest abstention case."
+      "expects_rewrite": false,
+      "note": "b11 describes the modules but never a budget"
     },
     {
-      "question": "What exercises are in the ABC DELF junior A2 book?",
+      "question": "Quel taux de change s'applique aux subventions versees a l'etranger ?",
       "language": "fr",
-      "answerable": true,
-      "expected_sources": ["ABC DELF junior A2.pdf"],
-      "expected_keywords": ["DELF"],
-      "note": "Image-only PDF: validates the OCR ingestion path end-to-end. Requires re-ingesting the file after OCR support landed."
+      "answerable": false,
+      "tier": "b",
+      "category": "unanswerable",
+      "expected_sources": [],
+      "expected_keywords": [],
+      "expects_rewrite": false,
+      "note": "no exchange-rate content anywhere in the corpus"
     }
   ]
 }

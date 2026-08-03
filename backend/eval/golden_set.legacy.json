@@ -1,0 +1,287 @@
+{
+  "_status": "RETIRED - DO NOT RUN. Kept for reference only.",
+  "_why": "These 23 entries were authored against the ad-hoc documents/ folder, which has no MANIFEST.yaml, no checksums and is not in version control. A number produced from them cannot be reproduced or compared, so they cannot back a baseline. They also predate the tier/category/answer_snippet/history schema and will be rejected by eval/run_eval.py's loader. The live golden set is eval/golden_set.json, authored against eval/corpus/.",
+  "_schema": {
+    "question": "the query to run",
+    "language": "en | fr",
+    "answerable": "false = the corpus cannot answer this; correct behavior is abstention (empty retrieval)",
+    "expected_sources": "files (basenames) a relevant chunk must come from",
+    "expected_keywords": "a retrieved chunk counts as relevant if its source matches AND any keyword appears (case-insensitive); empty list = source match alone suffices",
+    "note": "optional context for humans"
+  },
+  "entries": [
+    {
+      "question": "What are the core components of Hadoop?",
+      "language": "en",
+      "answerable": true,
+      "expected_sources": [
+        "Data Engineer Concepts.docx"
+      ],
+      "expected_keywords": [
+        "HDFS",
+        "MapReduce",
+        "Yarn"
+      ]
+    },
+    {
+      "question": "What is the difference between horizontal and vertical scaling in Hadoop?",
+      "language": "en",
+      "answerable": true,
+      "expected_sources": [
+        "Data Engineer Concepts.docx"
+      ],
+      "expected_keywords": [
+        "Horizontal Scaling",
+        "Vertical Scaling",
+        "Scale up",
+        "Scale down"
+      ]
+    },
+    {
+      "question": "Which Hadoop ecosystem tool is used for SQL and which for scheduling jobs?",
+      "language": "en",
+      "answerable": true,
+      "expected_sources": [
+        "Data Engineer Concepts.docx"
+      ],
+      "expected_keywords": [
+        "Hive",
+        "Oozie"
+      ]
+    },
+    {
+      "question": "What does Delta Lake add on top of a data lake?",
+      "language": "en",
+      "answerable": true,
+      "expected_sources": [
+        "Databricks Certification.docx"
+      ],
+      "expected_keywords": [
+        "ACID",
+        "time travel",
+        "Schema enforcement"
+      ]
+    },
+    {
+      "question": "What is the difference between an interactive cluster and a job cluster in Databricks?",
+      "language": "en",
+      "answerable": true,
+      "expected_sources": [
+        "Mastering the Cloud.docx"
+      ],
+      "expected_keywords": [
+        "cluster UI",
+        "spins up",
+        "exploratory"
+      ]
+    },
+    {
+      "question": "Can Databricks be managed using PowerShell?",
+      "language": "en",
+      "answerable": true,
+      "expected_sources": [
+        "Mastering the Cloud.docx"
+      ],
+      "expected_keywords": [
+        "PowerShell"
+      ]
+    },
+    {
+      "question": "What is the difference between an instance and a cluster in Databricks?",
+      "language": "en",
+      "answerable": true,
+      "expected_sources": [
+        "Mastering the Cloud.docx"
+      ],
+      "expected_keywords": [
+        "Virtual machine",
+        "group of instances"
+      ]
+    },
+    {
+      "question": "What is the difference between OLTP and OLAP?",
+      "language": "en",
+      "answerable": true,
+      "expected_sources": [
+        "Unit1-Databricks-review-bigdata-concept.pdf"
+      ],
+      "expected_keywords": [
+        "OLTP",
+        "OLAP"
+      ]
+    },
+    {
+      "question": "Which machine learning algorithm can be used for both regression and classification?",
+      "language": "en",
+      "answerable": true,
+      "expected_sources": [
+        "Machine Learning Algorithms.docx"
+      ],
+      "expected_keywords": [
+        "Nearest Neighbors",
+        "KNN"
+      ]
+    },
+    {
+      "question": "How does logistic regression predict outcomes?",
+      "language": "en",
+      "answerable": true,
+      "expected_sources": [
+        "Machine Learning Algorithms.docx"
+      ],
+      "expected_keywords": [
+        "Sigmoid",
+        "categorical"
+      ]
+    },
+    {
+      "question": "What is minimized when fitting a linear regression model?",
+      "language": "en",
+      "answerable": true,
+      "expected_sources": [
+        "Machine Learning Algorithms.docx"
+      ],
+      "expected_keywords": [
+        "squared residuals"
+      ]
+    },
+    {
+      "question": "When should you choose AWS Glue over Apache Airflow for ETL orchestration?",
+      "language": "en",
+      "answerable": true,
+      "expected_sources": [
+        "Interview Questions.docx"
+      ],
+      "expected_keywords": [
+        "Glue",
+        "Airflow"
+      ]
+    },
+    {
+      "question": "What tools can be used to monitor data quality and integrity in pipelines?",
+      "language": "en",
+      "answerable": true,
+      "expected_sources": [
+        "Interview Questions.docx",
+        "Data quality.txt"
+      ],
+      "expected_keywords": [
+        "CloudWatch",
+        "SNS",
+        "sampling",
+        "hash"
+      ]
+    },
+    {
+      "question": "What are the stages of a data pipeline?",
+      "language": "en",
+      "answerable": true,
+      "expected_sources": [
+        "System Design Concepts.docx"
+      ],
+      "expected_keywords": [
+        "Ingest",
+        "Transform",
+        "Collect"
+      ]
+    },
+    {
+      "question": "Which file formats are commonly used to store data in pipelines?",
+      "language": "en",
+      "answerable": true,
+      "expected_sources": [
+        "System Design Concepts.docx"
+      ],
+      "expected_keywords": [
+        "parquet",
+        "avro"
+      ]
+    },
+    {
+      "question": "Comment dit-on 'Hello' en français ?",
+      "language": "fr",
+      "answerable": true,
+      "expected_sources": [
+        "French Vocabulaire.xlsx"
+      ],
+      "expected_keywords": [
+        "Bonjour"
+      ]
+    },
+    {
+      "question": "Quelle préposition utilise-t-on pour dire qu'un objet est sur la table ?",
+      "language": "fr",
+      "answerable": true,
+      "expected_sources": [
+        "French Vocabulaire.xlsx"
+      ],
+      "expected_keywords": [
+        "sur la table"
+      ]
+    },
+    {
+      "question": "How do you ask someone's age in French?",
+      "language": "fr",
+      "answerable": true,
+      "expected_sources": [
+        "French Vocabulaire.xlsx"
+      ],
+      "expected_keywords": [
+        "Quel âge avez-vous"
+      ]
+    },
+    {
+      "question": "What columns does the advertising dataset contain?",
+      "language": "en",
+      "answerable": true,
+      "expected_sources": [
+        "advertising.csv"
+      ],
+      "expected_keywords": [
+        "Ad Topic Line",
+        "Daily Internet Usage"
+      ]
+    },
+    {
+      "question": "How can data quality be verified on incremental loads?",
+      "language": "en",
+      "answerable": true,
+      "expected_sources": [
+        "Data quality.txt"
+      ],
+      "expected_keywords": [
+        "hash",
+        "incremental",
+        "sampling"
+      ]
+    },
+    {
+      "question": "What is the capital of Australia?",
+      "language": "en",
+      "answerable": false,
+      "expected_sources": [],
+      "expected_keywords": [],
+      "note": "Out-of-corpus: correct behavior is abstention."
+    },
+    {
+      "question": "How do I configure a Kubernetes ingress controller?",
+      "language": "en",
+      "answerable": false,
+      "expected_sources": [],
+      "expected_keywords": [],
+      "note": "Out-of-corpus but domain-adjacent: hardest abstention case."
+    },
+    {
+      "question": "What exercises are in the ABC DELF junior A2 book?",
+      "language": "fr",
+      "answerable": true,
+      "expected_sources": [
+        "ABC DELF junior A2.pdf"
+      ],
+      "expected_keywords": [
+        "DELF"
+      ],
+      "note": "Image-only PDF: validates the OCR ingestion path end-to-end. Requires re-ingesting the file after OCR support landed."
+    }
+  ]
+}
