@@ -62,6 +62,10 @@ Verdict key: **CONFIRMED** · **ALREADY FIXED** · **INCORRECT — actual state 
 | **21** | **P0** | Entire current architecture is uncommitted; HEAD is the pre-refactor Streamlit app | `git log`, `git status --short` (49 entries) |
 | **22** | **P1** | Host `frontend/node_modules` is polluted with **glibc** binaries (`lightningcss-linux-x64-gnu`) installed by the Playwright `jammy` image in a prior session. Any lockfile generated from this tree would bake in the wrong platform's optional deps | `ls frontend/node_modules` → `lightningcss-linux-x64-gnu`; alpine build fails against it, clean-room build succeeds |
 | 23 | P3 | pytest in-container emits `PytestCacheWarning: Permission denied: /app/.pytest_cache` — the non-root `appuser` cannot write the cache dir | container pytest output |
+| **24** | **P1** | `nomic-embed-text:latest` is a moving tag and Ollama cannot pull or run by digest, so drift is undetectable. Fixed by ASSERTION (`core/model_identity.py`), not by reference | `/api/tags`; `ollama pull ...@sha256:` → `invalid model name` | **RESOLVED** |
+| **25** | **P2** | Base images pinned by tag and fastembed model repos unpinned — no build was reproducible, so no baseline was either | `api/Dockerfile`, `frontend/Dockerfile` | **RESOLVED** (`4e43c04`) |
+| 26 | P3 | apt-installed tesseract and its traineddata are unpinned; an OCR output change would leave no diff in this repository | `api/Dockerfile` apt layer | **OPEN** — Phase 4, vendor tessdata from a tagged release |
+| **27** | **P2** | `rerank_score_floor` is an absolute cut on a cross-encoder score whose scale tracks chunk SHAPE (prose vs table/list/OCR). Correctly-ranked first-place chunks are discarded and the user sees an abstention | tier-B baseline: `recall@fetch=1.0` vs `hit@k=0.318`, all 15 failures returned 0 chunks; 3/21 on the real corpus, all table/list answers | **OPEN** — proposal pending, no knob touched |
 
 ## 0.3 Finding 15 — correction
 
@@ -700,3 +704,201 @@ Four mechanisms this session looked like they worked and did not: the compose
 shell-env F24 test, the `HF_HUB_OFFLINE` pin, the `ENV FOO=${FOO}` recording,
 and this. Every one was caught by testing the check itself rather than the thing
 it checks.
+
+
+## [Phase 1.6] Two-mode harness, tier-B golden set, scripted corpus ingestion
+Status: DONE
+Commits: `7009a9c test(eval)` · `d63c917 feat(eval)` · `8ba24ea feat(eval)`
+
+### Harness (`eval/run_eval.py`, rewritten)
+
+Two modes, structured as the maintainer directed — two CI jobs, not one flag:
+
+| | retrieval | full |
+|---|---|---|
+| path | `RetrievalService` directly | `QueryService.prepare()` |
+| LLM in the loop | none at all | rewrite + multi-query expansion |
+| determinism | total | not deterministic |
+| tolerance | **zero** | **measured** (`--runs N`) |
+| when | every PR touching `extraction/`, `services/`, `integrations/`, `core/config.py` | nightly, and before merging changes to `query.py` / `retrieval.py` |
+
+Full mode **refuses to start** with `ENABLE_ANSWER_CACHE=true`. Runs 2..N would
+be served from Redis and report a variance that is a property of the cache, not
+of the system. Unit-tested in both directions.
+
+History is seeded into real `SessionMemory` rather than passed in, so the code
+path exercised is production's.
+
+Three gates run before any query: corpus manifest verification, embedding-model
+identity, and the cache check. Each one, skipped, produces numbers that look
+fine and mean nothing.
+
+Reporting is **per tier**, never averaged. Diagnostic slices (category,
+language, lexical overlap) are recorded and printed but not gated; the
+comparator gates tiers.
+
+The lexical-overlap slice is computed from the golden file's `answer_snippet`,
+not from retrieval output, so the slice is a stable property of the question.
+
+Every row records the `needs_rewrite()` verdict; entries carrying
+`expects_rewrite` are asserted against it and a mismatch **fails the run**.
+
+### Golden set (`eval/golden_set.json`, 25 entries, tier B)
+
+The previous 23 entries targeted the ad-hoc `documents/` folder — no manifest,
+no checksums, not in version control. Numbers from them are not reproducible, so
+they cannot back a baseline. Moved to `golden_set.legacy.json` with a `_status`
+header, not deleted, so nobody re-adopts them by accident.
+
+New schema fields: `tier`, `category`, `answer_snippet` (verbatim source text),
+`history`, `expects_rewrite`.
+
+    plain-fact 4 · table-answer 3 · long-table-tail 2 · ocr-answer 2
+    multi-hop 1 · cross-doc 1 · conversational 9 · unanswerable 3
+    18 en / 7 fr · 22 answerable / 3 unanswerable
+
+**Lexical-overlap rule met and enforced:** 16/22 answerable entries (73%) share
+under a third of their content words with the text that answers them, against
+the 40% floor. A unit test fails if it ever drops below 40%.
+
+**All four `needs_rewrite()` branches covered, in both languages** (as directed):
+
+| branch | entries | note |
+|---|---|---|
+| 1 · no history → skip | en, fr | the EN one deliberately contains "it"; branch order must beat the regex |
+| 2 · ≤6 words → short-circuit | en, fr | |
+| 3 · anaphora, long → fire | en, fr, +1 | the extra is French `faut-il`, a true positive that reads like a false one |
+| 4 · long, no anaphora → **must skip** | en, fr | where a widened regex over-triggers first, and it over-triggers in one language before the other |
+
+The French branch-4 entry also pins word-boundary behaviour: `Quelle` contains
+`elle` and must not match `\belle\b`. Separately unit-tested.
+
+### Corpus ingestion (`eval/ingest_corpus.py`)
+
+Refuses to run against the default collection — that one holds real user
+documents, and mixing the corpus in would put unmanifested content in every
+candidate pool. Verified: exit 2 with that message.
+
+The etag is the manifest's own sha256, so `uuid5(source:etag:chunk_seq)` point
+IDs become a pure function of the corpus definition. 13 documents → 18 chunks in
+`knowall_eval`; the production collection's 376 points were not touched.
+
+Gates: ruff clean · mypy 31 files clean · pytest **123 passed** (was 96).
+
+
+## [Phase 1.6] Tier-B diagnostic baseline — and what it found
+Status: DONE (diagnostic, NOT a reference baseline — see the provenance caveat)
+
+    retrieval mode, k=5, 3 runs, knowall_eval, manifest 32610e3d...
+
+    [tier_b]  n_answerable=22  n_abstention=3
+              recall_at_fetch = 1.000
+              hit_at_k        = 0.318
+              mrr_at_k        = 0.318
+              abstention_acc  = 1.000
+
+    variance across 3 runs: spread 0.0 on EVERY metric.
+
+**Determinism confirmed empirically.** Retrieval mode is byte-stable across
+three runs, which is what makes a zero CI tolerance defensible rather than
+optimistic. Full-mode variance still has to be measured separately.
+
+### The number that matters is not hit@k — it is the gap
+
+`recall_at_fetch = 1.0` with `hit_at_k = 0.318`. Retrieval finds the right chunk
+for **every** answerable question. All 15 failures returned **zero** chunks: the
+rerank score floor discarded them.
+
+Measured directly rather than inferred (top-3 rerank scores, floor = 0.25):
+
+    0.1602  b01-policy-notes.txt   <- correct   "How long must files be kept..."
+    0.0028  b02-handbook.md
+    0.0008  b06-operations.docx
+
+    0.2101  b03-sales.csv          <- correct   "What revenue did West record in Q4?"
+    0.0004  b07-review.pptx
+    0.0003  b04-wide-row.csv
+
+    0.0112  b09-scanned-notice.pdf <- correct   "maximum award under the heritage programme"
+    0.0012  b04-wide-row.csv
+
+    0.4475  b04-wide-row.csv       <- correct, and ABOVE the floor
+
+The correct document ranks **first in every case**, by two to three orders of
+magnitude. The ranking signal is excellent. What fails is the absolute cut.
+
+### I checked the obvious over-reading before writing it down
+
+"The floor is miscalibrated" would have been the wrong conclusion from tier B
+alone. Ran the same probe against the **real 376-point collection** using the
+retired golden set:
+
+    3 / 21 real-corpus questions fall below the floor
+    prose questions          0.66 - 0.99   comfortably above
+    the three that fail      0.014, 0.014, 0.078
+                             — French vocabulary table, French vocabulary
+                               table, CSV column list
+
+So the floor is not globally wrong. The pattern is **chunk shape**: the
+cross-encoder scores prose in the 0.65–0.99 band and table / list / OCR content
+in the 0.01–0.21 band, largely independent of whether the chunk actually
+answers. Tier B is almost entirely table, spreadsheet, list and OCR content,
+which is why it looks catastrophic there and mild on the real corpus. Same
+defect, different exposure.
+
+### `abstention_accuracy = 1.000` is unearned
+
+Recorded explicitly because it is the same defect seen from the other side. The
+system abstained on 15 of 22 answerable questions; scoring 3/3 on the
+unanswerable ones says nothing about abstention behaviour. Read alone it is a
+green checkmark that lies.
+
+### PROVENANCE CAVEAT — why this is not the reference baseline
+
+The recorded tuple contains:
+
+    reranker_revision : "unpinned"      bm25_revision : "unpinned"
+    git_sha           : "unknown"       api_image_digest : "unknown"
+
+Honest, and the mechanism working as designed: the **running container** was
+created from an image built before the `KNOWALL_*` env fix, and the eval code
+was `docker compose cp`'d into it. The container genuinely does not hold those
+values, and provenance reported exactly that instead of inventing them.
+
+Consequence: this baseline is a **diagnostic**, recorded to prove the harness
+works and to surface F27. It is not a comparison point. A reference baseline
+needs (a) containers recreated from the rebuilt image and (b) tier A, which does
+not exist yet.
+
+
+## F27 (NEW, P2) — rerank score floor is an absolute cut on a shape-dependent score
+Status: PROPOSAL-PENDING — no knob touched (R3, R5)
+Evidence: `eval/baselines/tier-b-retrieval-2026-08-03.json` + the two probes above
+
+`rerank_score_floor = 0.25` is applied as an absolute threshold to a
+cross-encoder sigmoid score whose scale depends on the **shape** of the chunk
+(prose vs table / list / OCR), not only on relevance. Correctly-ranked
+first-place chunks are discarded, and the user sees an abstention.
+
+Blast radius on the real corpus today: 3 of 21 golden questions — every one of
+them a table or list answer. On tier B: 15 of 22.
+
+Not fixed here. R3 freezes retrieval quality until it is measurable; it is
+measurable now, but the fix is a semantic knob and belongs in a proposal with a
+before/after delta, which the comparator will correctly label
+`COMPARABLE_WITH_SEMANTIC_DRIFT`.
+
+Candidate directions, in the order I would test them, none implemented:
+
+1. **Relative floor.** Keep the top result whenever it leads the runner-up by a
+   wide margin, regardless of absolute score. Fits the measurement: the winning
+   gap is 2–3 orders of magnitude in every failing case.
+2. **Floor by chunk shape.** The payload already carries enough to tell a table
+   chunk from a prose chunk. Two thresholds instead of one.
+3. **Lower the single floor.** Simplest, and the one most likely to trade a
+   real gain in hit@k for a real loss in abstention accuracy — which is exactly
+   what the tier-B abstention slice would show, and why it must be measured
+   rather than argued.
+
+Requires a decision before anything is changed. The harness can now produce the
+before/after for any of the three.
