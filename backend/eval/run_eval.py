@@ -32,11 +32,21 @@ REPORTING
   recorded and printed, but the comparator gates on tiers only.
 
 METRICS
-  recall@fetch  answerable queries with >=1 relevant chunk in the pooled
-                pre-rerank candidates (the retrieval ceiling)
-  hit@k         answerable queries with a relevant chunk in the final top-k
-  mrr@k         mean reciprocal rank of the first relevant final chunk
-  abstention    unanswerable queries that correctly returned nothing
+  recall@fetch             answerable queries with >=1 relevant chunk in the
+                           pooled pre-rerank candidates (the retrieval ceiling)
+  hit@k                    answerable queries with a relevant chunk in the
+                           final top-k
+  mrr@k                    mean reciprocal rank of the first relevant chunk
+  false_abstention_rate    ANSWERABLE queries that returned nothing.
+                           LOWER IS BETTER.
+  correct_abstention_rate  UNANSWERABLE queries that returned nothing.
+                           HIGHER IS BETTER.
+
+The abstention split is not cosmetic. A single "abstention_accuracy" measured
+over unanswerable entries alone reported 1.000 on a run that abstained on 15
+of 22 ANSWERABLE questions — it improves as the system stops answering, so it
+cannot gate a change to the score floor. The two rates move in opposite
+directions under that change, which is the whole point of separating them.
 
 A chunk is "relevant" when its source is in expected_sources AND (keywords
 empty OR any keyword appears in its text, case-insensitively).
@@ -260,6 +270,10 @@ def run_pass(container: Any, entries: list[dict], k: int, mode: str) -> list[dic
             )
             row.update({
                 "kind": "answerable",
+                # An answerable question that returned nothing. This is the
+                # user-facing failure: the system said "I don't know" about
+                # something the corpus answers.
+                "falsely_abstained": len(chunks) == 0,
                 "lexical_overlap": round(overlap, 3),
                 "low_overlap": overlap < LOW_OVERLAP_THRESHOLD,
                 "recall_at_fetch": any(
@@ -298,7 +312,10 @@ def metrics_for(rows: list[dict]) -> dict[str, Any]:
         "hit_at_k": _rate(answerable, "hit_at_k"),
         "mrr_at_k": (round(sum(r["reciprocal_rank"] for r in answerable) / len(answerable), 3)
                      if answerable else None),
-        "abstention_accuracy": _rate(abstention, "abstained_correctly"),
+        # Two populations, two numbers. Merging them lets a system that answers
+        # nothing score perfectly.
+        "false_abstention_rate": _rate(answerable, "falsely_abstained"),
+        "correct_abstention_rate": _rate(abstention, "abstained_correctly"),
     }
 
 
@@ -346,7 +363,8 @@ def variance_report(per_run: list[dict[str, Any]]) -> dict[str, Any]:
     zero; anything else is a source of nondeterminism we have not found."""
     report: dict[str, Any] = {}
     for tier in sorted({t for run in per_run for t in run}):
-        for metric in ("recall_at_fetch", "hit_at_k", "mrr_at_k", "abstention_accuracy"):
+        for metric in ("recall_at_fetch", "hit_at_k", "mrr_at_k",
+                       "false_abstention_rate", "correct_abstention_rate"):
             values = [run[tier][metric] for run in per_run
                       if tier in run and run[tier].get(metric) is not None]
             if len(values) < 2:
@@ -454,7 +472,8 @@ def main() -> int:
         print(f"\n-- by {slice_name} --")
         for label, m in buckets.items():
             print(f"  {label:<18} hit@k={m['hit_at_k']}  mrr={m['mrr_at_k']}  "
-                  f"abstain={m['abstention_accuracy']}  "
+                  f"false_abstain={m['false_abstention_rate']}  "
+                  f"correct_abstain={m['correct_abstention_rate']}  "
                   f"n={m['n_answerable']}+{m['n_abstention']}")
 
     rw = baseline["rewrite"]

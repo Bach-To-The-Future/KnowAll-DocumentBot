@@ -42,7 +42,16 @@ SEMANTIC = "COMPARABLE_WITH_SEMANTIC_DRIFT"
 INCOMPARABLE = "INCOMPARABLE"
 
 # Metrics where a DROP is a regression.
-HIGHER_IS_BETTER = ("recall_at_fetch", "hit_at_k", "mrr_at_k", "abstention_accuracy")
+HIGHER_IS_BETTER = ("recall_at_fetch", "hit_at_k", "mrr_at_k", "correct_abstention_rate")
+
+# Metrics where a RISE is a regression. false_abstention_rate is the
+# user-facing failure -- the system said "I don't know" about something the
+# corpus answers -- and it moves in the OPPOSITE direction to
+# correct_abstention_rate under any change to the score floor. Gating on only
+# one of the pair would let a change that silences the system look like a win.
+LOWER_IS_BETTER = ("false_abstention_rate",)
+
+METRIC_ORDER = HIGHER_IS_BETTER + LOWER_IS_BETTER
 
 
 def _diff(a: dict, b: dict, fields: tuple[str, ...]) -> list[tuple[str, Any, Any]]:
@@ -116,16 +125,20 @@ def compare(old: dict, new: dict, tolerance: float) -> int:
             print(f"[{tier}] present in only one baseline — skipped")
             continue
         print(f"[{tier}]")
-        for metric in HIGHER_IS_BETTER:
+        for metric in METRIC_ORDER:
             o, n = old_m.get(metric), new_m.get(metric)
             if o is None or n is None:
                 continue
             delta = n - o
+            # Sign of "bad" depends on the metric, not on the sign of the delta.
+            regressed = (delta > tolerance if metric in LOWER_IS_BETTER
+                         else delta < -tolerance)
+            arrow = "v" if metric in LOWER_IS_BETTER else "^"
             flag = ""
-            if delta < -tolerance:
+            if regressed:
                 flag = f"  <-- REGRESSION (tolerance {tolerance})"
                 regressions.append(f"{tier}.{metric}: {o:.3f} -> {n:.3f} ({delta:+.3f})")
-            print(f"  {metric:<22} {o:>6.3f} -> {n:>6.3f}  ({delta:+.3f}){flag}")
+            print(f"  {arrow} {metric:<24} {o:>6.3f} -> {n:>6.3f}  ({delta:+.3f}){flag}")
 
     if regressions:
         print("\nFAIL — regressions beyond tolerance:", file=sys.stderr)

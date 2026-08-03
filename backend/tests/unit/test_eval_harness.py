@@ -160,8 +160,8 @@ def test_expected_sources_reference_real_corpus_files() -> None:
 def _row(**kw):
     base = {"question": "q?", "tier": "b", "category": "plain-fact", "language": "en",
             "kind": "answerable", "low_overlap": True, "recall_at_fetch": True,
-            "hit_at_k": True, "reciprocal_rank": 1.0, "rewrite_would_fire": False,
-            "rewrite_fired": False}
+            "hit_at_k": True, "reciprocal_rank": 1.0, "falsely_abstained": False,
+            "rewrite_would_fire": False, "rewrite_fired": False}
     base.update(kw)
     return base
 
@@ -174,11 +174,26 @@ def test_tiers_are_reported_separately_and_never_merged() -> None:
     assert results["tier_b"]["hit_at_k"] == 0.0
 
 
-def test_abstention_rate_ignores_answerable_rows() -> None:
+def test_the_two_abstention_rates_are_measured_over_different_populations() -> None:
     rows = [_row(), _row(kind="abstention", abstained_correctly=False)]
     m = metrics_for(rows)
     assert m["n_answerable"] == 1 and m["n_abstention"] == 1
-    assert m["abstention_accuracy"] == 0.0 and m["hit_at_k"] == 1.0
+    assert m["correct_abstention_rate"] == 0.0  # over the 1 unanswerable row
+    assert m["false_abstention_rate"] == 0.0    # over the 1 answerable row
+    assert m["hit_at_k"] == 1.0
+
+
+def test_a_system_that_answers_nothing_does_not_score_perfectly() -> None:
+    """The defect the split exists to expose. One unanswerable row correctly
+    abstained on, three answerable rows abstained on too: the old single
+    abstention_accuracy read 1.000 here."""
+    rows = [_row(kind="abstention", abstained_correctly=True)] + [
+        _row(hit_at_k=False, reciprocal_rank=0.0, falsely_abstained=True) for _ in range(3)
+    ]
+    m = metrics_for(rows)
+    assert m["correct_abstention_rate"] == 1.0   # looks perfect on its own
+    assert m["false_abstention_rate"] == 1.0     # and is in fact total failure
+    assert m["hit_at_k"] == 0.0
 
 
 def test_empty_slice_is_omitted_rather_than_reported_as_zero() -> None:
@@ -200,7 +215,8 @@ def test_rewrite_branch_mismatch_is_surfaced() -> None:
 
 def test_identical_runs_report_zero_spread() -> None:
     run = {"tier_b": {"hit_at_k": 0.8, "mrr_at_k": 0.7,
-                      "recall_at_fetch": 0.9, "abstention_accuracy": 1.0}}
+                      "recall_at_fetch": 0.9, "correct_abstention_rate": 1.0,
+                      "false_abstention_rate": 0.1}}
     report = variance_report([run, run, run])
     assert report["max_spread"] == 0.0
 
@@ -208,9 +224,11 @@ def test_identical_runs_report_zero_spread() -> None:
 def test_spread_is_measured_per_tier_and_metric() -> None:
     runs = [
         {"tier_b": {"hit_at_k": 0.80, "mrr_at_k": 0.70,
-                    "recall_at_fetch": None, "abstention_accuracy": None}},
+                    "recall_at_fetch": None, "correct_abstention_rate": None,
+                    "false_abstention_rate": None}},
         {"tier_b": {"hit_at_k": 0.72, "mrr_at_k": 0.70,
-                    "recall_at_fetch": None, "abstention_accuracy": None}},
+                    "recall_at_fetch": None, "correct_abstention_rate": None,
+                    "false_abstention_rate": None}},
     ]
     report = variance_report(runs)
     assert report["tier_b.hit_at_k"]["spread"] == pytest.approx(0.08)

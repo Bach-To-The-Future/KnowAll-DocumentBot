@@ -176,6 +176,41 @@ def test_drop_within_tolerance_passes() -> None:
     assert rc == 0
 
 
+def test_a_rise_in_false_abstention_is_a_regression() -> None:
+    """The direction of "bad" is per-metric. false_abstention_rate going UP
+    means the system answers fewer questions it can answer -- the user-facing
+    failure -- so the same delta that is a win for hit@k is a loss here."""
+    rc = compare(
+        baseline(prov(), false_abstention_rate=0.10),
+        baseline(prov(), false_abstention_rate=0.40),
+        tolerance=0.02,
+    )
+    assert rc == 1
+
+
+def test_a_fall_in_false_abstention_is_not_a_regression() -> None:
+    rc = compare(
+        baseline(prov(), false_abstention_rate=0.40),
+        baseline(prov(), false_abstention_rate=0.10),
+        tolerance=0.02,
+    )
+    assert rc == 0
+
+
+def test_silencing_the_system_cannot_pass_as_an_improvement() -> None:
+    """The exact shape of a bad score-floor change: correct_abstention_rate
+    climbs to a perfect 1.0 while the system stops answering answerable
+    questions. Gating on only the first number would call this a win."""
+    rc = compare(
+        baseline(prov(), correct_abstention_rate=0.60, false_abstention_rate=0.05,
+                 hit_at_k=0.90),
+        baseline(prov(), correct_abstention_rate=1.00, false_abstention_rate=0.68,
+                 hit_at_k=0.32),
+        tolerance=0.02,
+    )
+    assert rc == 1
+
+
 def test_improvement_never_fails() -> None:
     rc = compare(
         baseline(prov(), hit_at_k=0.50),
