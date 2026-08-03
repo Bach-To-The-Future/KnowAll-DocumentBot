@@ -35,6 +35,7 @@ import argparse
 import datetime
 import hashlib
 import shutil
+import sys
 import zipfile
 from pathlib import Path
 
@@ -256,9 +257,48 @@ def gen_pdf_scanned() -> None:
     )
 
 
+def gen_pdf_scanned_fr() -> None:
+    """French image-only PDF.
+
+    tesseract-ocr-fra is installed in the API image and OCR_LANGUAGES is
+    "eng+fra", but nothing in the corpus exercised the French OCR path — a
+    regression in the fra traineddata would have been invisible.
+    """
+    import pymupdf
+
+    src = pymupdf.open()
+    page = src.new_page()
+    page.insert_text((72, 100), "AVIS ARCHIVE", fontsize=20)
+    page.insert_text((72, 140), "Le plafond de la subvention est de 75000 dollars.",
+                     fontsize=14)
+    page.insert_text((72, 170), "Les demandes doivent etre soumises avant le 31 mars.",
+                     fontsize=14)
+    pix = page.get_pixmap(dpi=200)
+    src.close()
+
+    doc = pymupdf.open()
+    out_page = doc.new_page(width=pix.width * 72 / 200, height=pix.height * 72 / 200)
+    out_page.insert_image(out_page.rect, pixmap=pix)
+    _pin_pdf(doc)
+    doc.save(OUT / "b13-avis-archive-fr.pdf", deflate=True, garbage=4)
+    doc.close()
+    SPEC["tier-b/b13-avis-archive-fr.pdf"] = (
+        "fr", None,
+        ["extractor:pdf", "ocr-answer", "image-only-page", "no-text-layer",
+         "ocr-lang:fra"],
+    )
+
+
 def gen_distractors() -> None:
     """Topically adjacent, answer-free. These exist so a retriever that ignores
-    the question still scores badly, and so abstention has something to reject."""
+    the question still scores badly, and so abstention has something to reject.
+
+    LIMITATION - RETARGET WHEN TIER A LANDS: these are adjacent to the SYNTHETIC
+    tier-B documents, not to real Government of Canada content. Against a tier-A
+    corpus they are topically unrelated, which makes them trivially easy to
+    reject and inflates abstention accuracy. Replace with distractors drawn from
+    the same department as the tier-A documents (tagged `retarget-with-tier-a`).
+    """
     specs = [
         ("b10-distractor-logistics.txt",
          "Logistics Overview\n"
@@ -275,12 +315,16 @@ def gen_distractors() -> None:
     ]
     for name, text in specs:
         (OUT / name).write_text(text, encoding="utf-8", newline="\n")
-        SPEC[f"tier-b/{name}"] = ("en", None, ["distractor", "no-answers"])
+        SPEC[f"tier-b/{name}"] = (
+            "en", None,
+            ["distractor", "no-answers", "retarget-with-tier-a"],
+        )
 
 
 GENERATORS = (
     gen_txt, gen_md, gen_csv_normal, gen_csv_oversized_row, gen_xlsx,
-    gen_docx, gen_pptx, gen_pdf_text, gen_pdf_scanned, gen_distractors,
+    gen_docx, gen_pptx, gen_pdf_text, gen_pdf_scanned, gen_pdf_scanned_fr,
+    gen_distractors,
 )
 
 
@@ -316,9 +360,28 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--manifest", action="store_true",
                         help="print MANIFEST.yaml entries for the generated files")
+    parser.add_argument("--force", action="store_true",
+                        help="overwrite committed corpus files (see warning below)")
     args = parser.parse_args()
 
     OUT.mkdir(parents=True, exist_ok=True)
+    existing = sorted(p.name for p in OUT.glob("*") if p.is_file())
+    if existing and not args.force:
+        print(
+            f"REFUSING TO OVERWRITE the committed tier-B corpus "
+            f"({len(existing)} files in {OUT}).\n\n"
+            "MANIFEST.yaml is AUTHORITATIVE, not this generator: .xlsx and .pdf\n"
+            "are not byte-reproducible (openpyxl and PyMuPDF embed time-varying\n"
+            "state), so regenerating them produces equivalent CONTENT with\n"
+            "different bytes. That invalidates every checksum in the manifest\n"
+            "and every baseline recorded against it.\n\n"
+            "If you genuinely intend to re-author the corpus:\n"
+            "  1. python eval/corpus/generate_tier_b.py --force\n"
+            "  2. python eval/corpus/generate_tier_b.py --manifest\n"
+            "  3. update MANIFEST.yaml, then re-record EVERY baseline\n",
+            file=sys.stderr,
+        )
+        return 1
     for generator in GENERATORS:
         generator()
 
