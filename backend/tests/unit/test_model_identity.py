@@ -21,6 +21,13 @@ OTHER = "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
 
 
 def settings(**kw) -> Settings:
+    """`_env_file=None` skips the dotenv file but NOT os.environ, and the api and
+    worker services both export EXPECTED_EMBED_MODEL_DIGEST (that export is the
+    F24 enforcement — it must stay). Without pinning the fields under test here,
+    the in-container run inherits a real digest and the "unset" case silently
+    becomes the "set" case. Explicit defaults, overridable per test."""
+    kw.setdefault("expected_embed_model_digest", None)
+    kw.setdefault("use_openai_embedding", False)
     return Settings(_env_file=None, **kw)
 
 
