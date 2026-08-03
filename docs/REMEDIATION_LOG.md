@@ -517,3 +517,186 @@ METHODOLOGY CORRECTION (recorded because the first run proved nothing):
   "sha256:" prefix. My earlier report wrote it prefixed - that was my own
   formatting, not the wire value. .env.example now states the format explicitly
   and includes the one-liner to read the live value.
+
+
+## [Phase 1.6-pre / F25] Build reproducibility — base images and model revisions
+Status: DONE
+Finding ref: #25 (P2) — no HF revision pin; unpinned base images; unpinned apt
+Commit: `4e43c04 build(f25): pin base images by digest and assert HF model revisions`
+
+Two unpinned inputs made every eval baseline unreproducible:
+
+1. **Base images by tag.** `python:3.12-slim` and `node:22-alpine` are
+   republished on every security refresh. Both Dockerfiles now pin by sha256
+   digest (tag retained in a comment for readability):
+
+       python  sha256:401f6e1a67dad31a1bd78e9ad22d0ee0a3b52154e6bd30e90be696bb6a3d7461
+       node    sha256:16e22a550f3863206a3f701448c45f7912c6896a62de43add43bb9c86130c3e2
+
+   Verified against `docker images --digests`: these are the digests actually
+   resolved for the local `python:3.12-slim` / `node:22-alpine` tags.
+
+2. **fastembed repositories by name only.** `Qdrant/bm25` and
+   `BAAI/bge-reranker-base` resolved to whatever the default branch was at
+   build time. A reranker weight change moves every rerank score, and therefore
+   every eval number, with **no diff in this repository**. Pinned to
+   `e499a1f8d6bec960aab5533a0941bf914e70faf9` and
+   `2cfc18c9415c912f9d8155881c133215df768a70`.
+
+### FAILED APPROACH (recorded so it is not retried)
+
+`HF_HUB_OFFLINE=1` as the enforcement mechanism **does not work**. fastembed
+does not resolve models through the plain `huggingface_hub` cache layout; with
+offline mode set the constructor fails outright:
+
+    ValueError: Could not load model Qdrant/bm25 from any source
+
+An earlier note in this log claimed "the pins worked — snapshot dirs match".
+That claim was **WRONG**: the directories matched because those SHAs happen to
+*be* current `main`. A check that passes for the wrong reason is not a check.
+Replaced with a post-hoc assertion.
+
+### The mechanism actually shipped
+
+`api/Dockerfile` runs three steps in one layer:
+
+    1. snapshot_download() the exact commits into the HF cache
+    2. run the fastembed constructors (they populate the cache themselves)
+    3. run api/verify_model_pins.py — FAILS THE BUILD on any deviation
+
+`verify_model_pins.py` requires the pinned snapshot to be the **sole** cached
+snapshot. Checking only that it *exists* is vacuous: step 1 guarantees that on
+its own. If fastembed then resolved the default branch to a newer commit, that
+commit would sit alongside as a **second** snapshot and be the one actually
+loaded — while a presence-only check passed cleanly. This weakness was found by
+testing the verifier, not by reading it.
+
+### Verifier tested in BOTH directions before being trusted (as directed)
+
+    POSITIVE  correct pins
+              -> "model revision verified: models--Qdrant--bm25 @ e499a1f8...
+                  (sole cached snapshot)"
+                 "model revision verified: models--BAAI--bge-reranker-base @
+                  2cfc18c9... (sole cached snapshot)"
+              -> exit 0
+
+    NEGATIVE  wrong pin (BM25 revision set to a different valid-looking commit)
+              -> "MODEL REVISION PIN VIOLATED"
+                 "  models--Qdrant--bm25: pinned 1111... not cached;
+                    present=['e499a1f8...']"
+              -> exit 1
+
+    NEGATIVE  simulated second snapshot (fastembed resolved something else)
+              -> "MODEL REVISION PIN VIOLATED"
+                 "  models--Qdrant--bm25: 2 snapshots cached
+                    ['deadbeef...','e499a1f8...']; expected only the pinned
+                    e499a1f8.... fastembed resolved a revision other than the pin."
+              -> exit 1
+
+Re-run against the **shipped** images (mounting the script into
+`knowall-documentbot-api` and `knowall-documentbot-worker`): both exit 0, both
+report the sole cached snapshot. That is artifact-level proof, stronger than a
+build-log line.
+
+### Provenance recording — and the silent bug in the first attempt
+
+The revisions are baked into the image as `KNOWALL_BM25_REVISION` /
+`KNOWALL_RERANKER_REVISION` so a running container reports what it actually
+holds into the baseline provenance tuple.
+
+The env names deliberately differ from the ARG names. Docker resolves a
+self-referencing `ENV FOO=${FOO}` against a same-named `ARG FOO` to the **empty
+string**. The first attempt therefore recorded `reranker_revision: "unpinned"`
+in provenance while the download itself was correctly pinned — a green build
+that lied. Confirmed fixed by `docker inspect` **and** `printenv` inside a
+running container of both images: both variables non-empty and correct.
+
+### Also recorded
+
+- Embedded newlines in a `RUN python -c "..."` broke the Dockerfile parse
+  (`unknown instruction:`). The verifier lives in a real script file, COPY'd in
+  and `rm`'d after use.
+- **Not covered:** apt-installed `tesseract-ocr` / `tesseract-ocr-fra` and
+  their traineddata remain unpinned. A traineddata change would move OCR output
+  with no diff here. Logged as **F26 (P3, Phase 4)** and documented inline in
+  the Dockerfile; agreed fix is to vendor `eng.traineddata` / `fra.traineddata`
+  from a tagged tessdata release, checksummed in a manifest, COPY'd in with
+  `TESSDATA_PREFIX` set. `snapshot.debian.org` was explicitly ruled out.
+  Phase 1 is **not** blocked on it.
+
+Gates: ruff clean · mypy 31 files clean · pytest 60 passed (in-container).
+
+
+## [Phase 1.6-pre] Provenance tuple + four-outcome comparator
+Status: DONE
+Commit: `0acb69a feat(eval): add provenance tuple and four-outcome baseline comparator`
+Files: `eval/provenance.py` (new), `eval/compare.py` (new),
+`tests/unit/test_eval_comparator.py` (new, 36 tests)
+
+The failure mode a comparator exists to prevent is not a missing number — it is
+a **real number read as a result when it is a different measurement**. So the
+comparator's primary job is to refuse.
+
+Four outcomes:
+
+| Outcome | Trigger | Behaviour |
+|---|---|---|
+| `COMPARABLE` | nothing drifted | diff the numbers |
+| `COMPARABLE_WITH_COSMETIC_DRIFT` | git sha, api/web image digest, bm25/reranker revision | named in the output; no expected retrieval effect |
+| `COMPARABLE_WITH_SEMANTIC_DRIFT` | `retrieval_fetch_k`, `rerank_top_n`, `rerank_score_floor`, `retrieval_context_mode`, `neighbor_window`, `parent_char_budget`, `enable_multi_query`, `query_expansion_count`, `enable_answer_cache`, `reranker_model` | metrics ARE printed, prefixed with a warning naming every drifted knob. Not a refusal — comparing across a knob sweep is what a sweep is for |
+| `INCOMPARABLE` | `corpus_manifest_sha256`, `embed_model`, `embed_model_digest`, `chunk_size`, `chunk_overlap`, `table_chunk_char_budget`, `table_max_rows_per_chunk`, `eval_mode` | **hard refusal, exit 2, no metrics printed at all** |
+
+`eval_mode` is in the hard set (as directed): retrieval-mode numbers
+(deterministic, no LLM) and full-mode numbers (rewrite + expansion in the loop)
+are not the same quantity.
+
+**`llm_model` is conditional on `eval_mode`** (as directed):
+
+- **full mode → HARD.** The generation model drives query rewrite and
+  multi-query expansion, so it changes retrieval *inputs*. A different model is
+  a different system, not drift.
+- **retrieval mode → COSMETIC.** The LLM never runs; its identity cannot have
+  moved a single retrieval number.
+
+`classify_fields(eval_mode)` owns that split and is the single source of truth;
+`fingerprint()` hashes only the mode-appropriate hard fields. When two baselines
+disagree on mode the comparator takes the stricter reading — though `eval_mode`
+being hard means such a pair is already `INCOMPARABLE`.
+
+Metrics are compared **per tier**. Tier A and tier B are never averaged; a test
+pins that a tier A collapse (0.90 → 0.60) is not masked by a tier B gain
+(0.40 → 0.90).
+
+Exit codes: `0` within tolerance · `1` regression · `2` incomparable.
+
+Test coverage that matters: every hard field individually forces refusal; every
+semantic field individually forces the semantic verdict; precedence
+(hard > semantic > cosmetic) is pinned; `INCOMPARABLE` is asserted to print
+**no** metric text even when the delta is 0.90 → 0.10; the field classes are
+asserted disjoint in both modes.
+
+Gates: ruff clean · mypy clean · pytest **96 passed** (was 60).
+
+
+## [defect found while re-greening] Env leakage into the model-identity tests
+Status: DONE
+Commit: `ad1470a fix(tests): pin model-identity settings against os.environ leakage`
+
+Self-inflicted, and worth recording because it is the same class of error as the
+two above. The F24 live proof added `EXPECTED_EMBED_MODEL_DIGEST` to the api and
+worker `environment:` maps. `Settings(_env_file=None)` skips the dotenv file but
+**still reads `os.environ`**, so from that commit onward the in-container run of
+`test_unset_expectation_warns_but_does_not_fail` was exercising the *set* path
+and failing with `ModelIdentityError`.
+
+The export is the F24 enforcement mechanism and stays. The test helper now sets
+`expected_embed_model_digest` and `use_openai_embedding` explicitly (overridable
+per test) so each case runs the state it names.
+
+    before -> 1 failed, 59 passed
+    after  -> 60 passed
+
+Four mechanisms this session looked like they worked and did not: the compose
+shell-env F24 test, the `HF_HUB_OFFLINE` pin, the `ENV FOO=${FOO}` recording,
+and this. Every one was caught by testing the check itself rather than the thing
+it checks.
