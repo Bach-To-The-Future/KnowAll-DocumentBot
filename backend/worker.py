@@ -30,6 +30,7 @@ from arq import Retry
 from arq.connections import RedisSettings
 
 from core.config import Settings, get_settings
+from core.model_identity import verify_embedding_model
 from services.container import ServiceContainer, build_container
 
 logging.basicConfig(level=logging.INFO)
@@ -144,6 +145,10 @@ async def startup(ctx: dict) -> None:
     A SIGKILL mid-ingest leaves status="running" forever; without this the UI
     polls a job that no process is working on.
     """
+    # Same identity gate as the API: a worker that embeds documents with a
+    # drifted model would poison the index one job at a time.
+    verify_embedding_model(_settings, context="worker startup")
+
     container = get_container()
     swept = 0
     for job in await asyncio.to_thread(container.job_store.list_jobs, 1000):

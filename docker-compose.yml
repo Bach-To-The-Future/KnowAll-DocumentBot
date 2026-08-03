@@ -129,6 +129,9 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       USE_OPENAI_LLM: ${USE_OPENAI_LLM:-false}
       USE_OPENAI_EMBEDDING: ${USE_OPENAI_EMBEDDING:-false}
+      # Bare hex digest as reported by Ollama /api/tags (NO sha256: prefix).
+      # Unset = loud warning; set = hard fail on drift (finding #24).
+      EXPECTED_EMBED_MODEL_DIGEST: ${EXPECTED_EMBED_MODEL_DIGEST:-}
       RERANKER_MODEL: ${RERANKER_MODEL:-BAAI/bge-reranker-base}
       ENABLE_OCR: ${ENABLE_OCR:-true}
       INGEST_BATCH_SIZE: ${INGEST_BATCH_SIZE:-256}
@@ -176,6 +179,9 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       USE_OPENAI_LLM: ${USE_OPENAI_LLM:-false}
       USE_OPENAI_EMBEDDING: ${USE_OPENAI_EMBEDDING:-false}
+      # Bare hex digest as reported by Ollama /api/tags (NO sha256: prefix).
+      # Unset = loud warning; set = hard fail on drift (finding #24).
+      EXPECTED_EMBED_MODEL_DIGEST: ${EXPECTED_EMBED_MODEL_DIGEST:-}
       RERANKER_MODEL: ${RERANKER_MODEL:-BAAI/bge-reranker-base}
       ENABLE_OCR: ${ENABLE_OCR:-true}
       API_KEY: ${API_KEY}

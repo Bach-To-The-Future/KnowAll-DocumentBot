@@ -26,6 +26,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from core.config import get_settings  # noqa: E402
+from core.model_identity import verify_embedding_model  # noqa: E402
 from services.container import build_container  # noqa: E402
 
 
@@ -41,6 +42,9 @@ def is_relevant(text: str, source: str, entry: dict) -> bool:
 
 def evaluate(golden_path: str, k: int):
     settings = get_settings()
+    # Identity gate before a single query runs: numbers produced under a
+    # drifted embedding model are not comparable to any committed baseline.
+    verify_embedding_model(settings, context="eval")
     retrieval = build_container(settings).retrieval
 
     with open(golden_path, encoding="utf-8") as f:

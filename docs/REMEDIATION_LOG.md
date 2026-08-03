@@ -467,3 +467,53 @@ not that the tag can move; it is that it can move UNDETECTABLY. That is fixable:
 This delivers F24's actual requirement - zero silent drift - without depending on
 a capability Ollama does not have. Needs approval because it changes startup
 behaviour from permissive to fail-closed.
+
+
+## [Phase 2.1-pre / F24] Embedding-model identity enforcement
+Status: DONE
+Finding ref: #24 (P1) - verdict CONFIRMED; prescribed fix NOT ACHIEVABLE,
+maintainer approved the counter-proposal (pin by assertion).
+Change: New core/model_identity.py enforces embedding-model identity at three
+points with one shared policy; ModelIdentityError added; digest wired through
+config, compose and .env.example.
+Files: core/model_identity.py (new), core/exceptions.py:25-32,
+core/config.py:50-55, api/main.py:16,56-60, worker.py:33,148-150,
+eval/run_eval.py:head, docker-compose.yml (api + worker), .env.example,
+tests/unit/test_model_identity.py (new, 8 tests)
+
+Semantics implemented exactly as directed:
+    digest mismatch            -> HARD FAIL (api startup, worker startup, eval head)
+    expected unset             -> loud WARNING, never a failure
+    Ollama unreachable         -> NOT a mismatch; defers to the existing
+                                  readiness path, no duplicated liveness check
+    no dev escape-hatch env var
+    OpenAI backend exempt (immutable model names, no moving tag)
+
+Built for 2.1 to EXTEND, not to be replaced: verify_three_way() already
+implements config vs. live Ollama vs. payload digest. 2.1 only has to pass the
+stored value in. Documented as NOT retroactive - the 372 existing points carry
+no digest, so stored_digest=None is "unknown", not "mismatch"; three-way becomes
+authoritative from the first reindex forward.
+
+Evidence:
+    pytest                     -> 60 passed (was 53; 8 new minus overlap)
+    unset digest               -> WARNING "...drift is UNDETECTABLE...", api healthy
+    WRONG digest (deadbeef...) -> ModelIdentityError: Embedding model identity
+                                  mismatch at api startup
+                                  ERROR: Application startup failed. Exiting.
+    CORRECT digest             -> [api startup] identity verified ... @ 0a109f422b47...
+                                  [worker startup] identity verified ... @ 0a109f422b47...
+
+METHODOLOGY CORRECTION (recorded because the first run proved nothing):
+  My initial live test set EXPECTED_EMBED_MODEL_DIGEST in the SHELL and
+  concluded "healthy = pass". That was invalid: compose reads container env
+  from the per-service `environment:` map, and shell variables only feed
+  ${VAR} interpolation. The variable never reached the container, so the API
+  was still running the unset-warning path. Fixed by adding
+  EXPECTED_EMBED_MODEL_DIGEST to BOTH the api and worker environment maps, then
+  re-running. Only the second run is evidence.
+
+  Second correction: Ollama /api/tags returns a BARE HEX digest with no
+  "sha256:" prefix. My earlier report wrote it prefixed - that was my own
+  formatting, not the wire value. .env.example now states the format explicitly
+  and includes the one-liner to read the live value.

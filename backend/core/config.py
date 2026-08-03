@@ -48,6 +48,11 @@ class Settings(BaseSettings):
     use_openai_embedding: bool = False
     openai_embed_model: str = "text-embedding-3-small"
     ollama_embed_model: str = "nomic-embed-text:latest"
+    # Identity pin for the embedding model. Ollama cannot pull BY digest
+    # (`name@sha256:…` -> "invalid model name"), so drift is caught by
+    # assertion instead: unset = loud warning, set = hard fail on mismatch at
+    # API startup, worker startup and the eval head. See core/model_identity.py.
+    expected_embed_model_digest: str | None = None
 
     @computed_field  # type: ignore[prop-decorator]
     @property

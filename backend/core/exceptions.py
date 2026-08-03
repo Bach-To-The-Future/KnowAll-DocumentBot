@@ -22,6 +22,16 @@ class ConfigurationError(RAGSystemError):
     """Invalid or missing configuration."""
 
 
+class ModelIdentityError(RAGSystemError):
+    """The live embedding model is not the one the index was built with.
+
+    Fatal on purpose: continuing would embed queries with a different model
+    than the stored vectors, degrading retrieval silently (finding #24).
+    """
+
+    http_status = 503
+
+
 class InvalidRequestError(RAGSystemError):
     """Client-supplied input failed validation (e.g. path traversal)."""
 

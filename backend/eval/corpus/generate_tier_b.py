@@ -32,8 +32,8 @@ Usage (inside the api container, which has every parser installed):
 from __future__ import annotations
 
 import argparse
-import hashlib
 import datetime
+import hashlib
 import shutil
 import zipfile
 from pathlib import Path
