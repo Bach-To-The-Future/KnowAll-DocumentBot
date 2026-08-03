@@ -38,6 +38,11 @@ def _load_manifest() -> dict[str, Any]:
     return data
 
 
+def load_manifest() -> dict[str, Any]:
+    """Public accessor — eval/ingest_corpus.py walks the document list."""
+    return _load_manifest()
+
+
 def sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as fh:
