@@ -1,0 +1,249 @@
+name: Eval
+
+# Two jobs, deliberately not one job with a mode flag. They answer different
+# questions, run on different triggers, and carry different tolerances.
+#
+#   retrieval  deterministic (no LLM in the loop), tolerance ZERO. Gates PRs
+#              that touch the retrieval path.
+#   full       LLM in the loop for rewrite and expansion, tolerance MEASURED.
+#              Nightly and on demand — too slow and too noisy for every PR.
+#
+# HONEST STATUS: there is no reference baseline in eval/baselines/ yet, and
+# there cannot be one until tier A is populated (tier B alone is deliberately
+# table-, list- and OCR-heavy, so its numbers describe that composition rather
+# than the system). Until then the regression gate is INACTIVE and says so
+# loudly. What IS gated today: corpus integrity, embedding-model identity,
+# golden-set schema, and needs_rewrite() branch agreement.
+
+on:
+  pull_request:
+    paths:
+      - 'backend/extraction/**'
+      - 'backend/services/**'
+      - 'backend/integrations/**'
+      - 'backend/core/config.py'
+      - 'backend/eval/**'
+      - '.github/workflows/eval.yml'
+  schedule:
+    - cron: '0 6 * * *'   # nightly, full mode
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'retrieval | full'
+        required: false
+        default: 'full'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  MINIO_ROOT_USER: ci_minio_user
+  MINIO_ROOT_PASSWORD: ci_minio_password
+  MINIO_ENDPOINT: minio:9000
+  MINIO_ACCESS_KEY: ci_minio_user
+  MINIO_SECRET_KEY: ci_minio_password
+  MINIO_BUCKET: knowall
+  QDRANT_HOST: qdrant
+  QDRANT_PORT: "6333"
+  QDRANT_COLLECTION: knowall_collection
+  QDRANT_API_KEY: ci-qdrant-key
+  OLLAMA_API_URL: http://ollama:11434/api/
+  REDIS_URL: redis://redis:6379/0
+  BACKEND_URL: http://api:8000
+  API_KEY: ci-admin-key
+  API_QUERY_KEY: ci-readonly-key
+  API_QUERY_KEYS: ci-readonly-key
+  SESSION_SECRET: ci-session-secret-at-least-32-chars-long
+  AUTH_PASSWORD: ci-password
+  AUTH_REQUIRED: "true"
+  COOKIE_SECURE: "false"
+  # The eval corpus NEVER shares a collection with real documents.
+  EVAL_COLLECTION: knowall_eval
+
+jobs:
+  retrieval:
+    name: Eval — retrieval mode (deterministic, tolerance 0)
+    if: github.event_name == 'pull_request' || github.event.inputs.mode == 'retrieval'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Write .env for compose
+        run: |
+          {
+            for key in MINIO_ROOT_USER MINIO_ROOT_PASSWORD MINIO_ENDPOINT \
+                       MINIO_ACCESS_KEY MINIO_SECRET_KEY MINIO_BUCKET \
+                       QDRANT_HOST QDRANT_PORT QDRANT_COLLECTION QDRANT_API_KEY \
+                       OLLAMA_API_URL REDIS_URL BACKEND_URL \
+                       API_KEY API_QUERY_KEY API_QUERY_KEYS \
+                       SESSION_SECRET AUTH_PASSWORD AUTH_REQUIRED COOKIE_SECURE; do
+              echo "${key}=${!key}"
+            done
+          } > .env
+
+      - name: Build and start stack
+        run: |
+          docker compose build api worker
+          docker compose up -d --wait --wait-timeout 900 qdrant redis minio ollama api
+
+      # The eval needs a warm embedding model; the E2E job does not, which is
+      # why it does not pull one.
+      - name: Pull embedding model
+        run: docker compose exec -T ollama ollama pull nomic-embed-text
+
+      - name: Corpus integrity
+        run: docker compose exec -T api python eval/corpus/verify.py
+
+      - name: Ingest corpus into a dedicated collection
+        run: |
+          docker compose exec -T -e QDRANT_COLLECTION=${EVAL_COLLECTION} \
+            api python eval/ingest_corpus.py
+
+      - name: Run eval
+        run: |
+          docker compose exec -T \
+            -e QDRANT_COLLECTION=${EVAL_COLLECTION} \
+            -e KNOWALL_GIT_SHA=${{ github.sha }} \
+            api python -u eval/run_eval.py --mode retrieval --runs 2 \
+              --tolerance 0.0 --out /tmp/baseline.json
+          docker compose cp api:/tmp/baseline.json ./baseline.json
+
+      # Retrieval mode has no LLM anywhere in it. Two identical passes MUST
+      # produce identical numbers; anything else is nondeterminism we have not
+      # found, and it would make every future comparison unreliable.
+      - name: Assert determinism
+        run: |
+          python - <<'PY'
+          import json, sys
+          v = json.load(open("baseline.json")).get("variance", {})
+          spread = v.get("max_spread")
+          print(f"max_spread across runs: {spread}")
+          if spread is None:
+              sys.exit("no variance recorded — expected --runs >= 2")
+          if spread != 0:
+              sys.exit(f"retrieval mode is NOT deterministic (max_spread={spread})")
+          print("OK — identical across runs")
+          PY
+
+      - name: Compare against reference baseline
+        run: |
+          shopt -s nullglob
+          refs=(backend/eval/baselines/tier-*-retrieval-*.json)
+          ref=""
+          for f in "${refs[@]}"; do
+            python - "$f" <<'PY' && ref="$f"
+          import json, sys
+          p = json.load(open(sys.argv[1]))["provenance"]
+          bad = [k for k in ("git_sha", "api_image_digest") if p.get(k) == "unknown"]
+          bad += [k for k in ("reranker_revision", "bm25_revision")
+                  if p.get(k) == "unpinned"]
+          sys.exit(1 if bad else 0)
+          PY
+          done
+          if [ -z "$ref" ]; then
+            echo "::warning title=Regression gate INACTIVE::No reference baseline in"\
+                 "eval/baselines/ — every file there is a diagnostic (unresolved"\
+                 "provenance). A reference baseline requires tier A. Corpus, model"\
+                 "identity, schema and rewrite-branch checks above still gated."
+            exit 0
+          fi
+          echo "comparing against $ref"
+          docker compose cp "$ref" api:/tmp/ref.json
+          docker compose cp ./baseline.json api:/tmp/new.json
+          docker compose exec -T api python eval/compare.py /tmp/ref.json /tmp/new.json
+
+      - name: Upload baseline
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-retrieval-baseline
+          path: baseline.json
+          retention-days: 30
+
+      - name: Diagnostics on failure
+        if: failure()
+        run: docker compose ps && docker compose logs --tail 120 api
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v
+
+  full:
+    name: Eval — full mode (LLM in the loop, measured tolerance)
+    if: github.event_name == 'schedule' || github.event.inputs.mode == 'full'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Write .env for compose
+        run: |
+          {
+            for key in MINIO_ROOT_USER MINIO_ROOT_PASSWORD MINIO_ENDPOINT \
+                       MINIO_ACCESS_KEY MINIO_SECRET_KEY MINIO_BUCKET \
+                       QDRANT_HOST QDRANT_PORT QDRANT_COLLECTION QDRANT_API_KEY \
+                       OLLAMA_API_URL REDIS_URL BACKEND_URL \
+                       API_KEY API_QUERY_KEY API_QUERY_KEYS \
+                       SESSION_SECRET AUTH_PASSWORD AUTH_REQUIRED COOKIE_SECURE; do
+              echo "${key}=${!key}"
+            done
+          } > .env
+
+      - name: Build and start stack
+        run: |
+          docker compose build api worker
+          docker compose up -d --wait --wait-timeout 900 qdrant redis minio ollama api
+
+      - name: Pull models
+        run: |
+          docker compose exec -T ollama ollama pull nomic-embed-text
+          docker compose exec -T ollama ollama pull llama3.2:1b
+
+      - name: Ingest corpus into a dedicated collection
+        run: |
+          docker compose exec -T api python eval/corpus/verify.py
+          docker compose exec -T -e QDRANT_COLLECTION=${EVAL_COLLECTION} \
+            api python eval/ingest_corpus.py
+
+      # ENABLE_ANSWER_CACHE=false is not optional: with the cache on, runs 2
+      # and 3 are served from Redis and the measured variance is a property of
+      # the cache. run_eval.py refuses to start without it.
+      - name: Run eval (3 passes, cache disabled)
+        run: |
+          docker compose exec -T \
+            -e QDRANT_COLLECTION=${EVAL_COLLECTION} \
+            -e ENABLE_ANSWER_CACHE=false \
+            -e KNOWALL_GIT_SHA=${{ github.sha }} \
+            api python -u eval/run_eval.py --mode full --runs 3 \
+              --out /tmp/baseline.json
+          docker compose cp api:/tmp/baseline.json ./baseline.json
+
+      - name: Report measured variance
+        run: |
+          python - <<'PY'
+          import json
+          v = json.load(open("baseline.json")).get("variance", {})
+          for key, val in sorted(v.items()):
+              if isinstance(val, dict):
+                  print(f"{key:<30} spread={val['spread']:<8} stdev={val['stdev']:<8} {val['values']}")
+          print(f"\nMAX SPREAD: {v.get('max_spread')}")
+          print("This is the number the full-mode tolerance is derived from.")
+          PY
+
+      - name: Upload baseline
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-full-baseline
+          path: baseline.json
+          retention-days: 90
+
+      - name: Diagnostics on failure
+        if: failure()
+        run: docker compose ps && docker compose logs --tail 120 api
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v

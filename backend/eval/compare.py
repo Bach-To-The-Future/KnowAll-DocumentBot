@@ -125,6 +125,16 @@ def compare(old: dict, new: dict, tolerance: float) -> int:
             print(f"[{tier}] present in only one baseline — skipped")
             continue
         print(f"[{tier}]")
+        # A metric the OLD baseline gated on and the NEW one does not report is
+        # a gate that quietly disappeared -- a rename or a dropped field would
+        # otherwise pass as "no regression". The reverse (new metric, old
+        # baseline predates it) is normal and silent.
+        dropped = [m for m in METRIC_ORDER
+                   if old_m.get(m) is not None and new_m.get(m) is None]
+        if dropped:
+            print(f"  WARNING: no longer reported, so no longer gated: "
+                  f"{', '.join(dropped)}")
+
         for metric in METRIC_ORDER:
             o, n = old_m.get(metric), new_m.get(metric)
             if o is None or n is None:

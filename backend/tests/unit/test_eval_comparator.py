@@ -257,3 +257,26 @@ def test_field_classes_are_disjoint() -> None:
         assert len(set(hard) | set(semantic) | set(cosmetic)) == (
             len(hard) + len(semantic) + len(cosmetic)
         ), f"a field is classified twice in {mode} mode"
+
+
+def test_a_metric_that_stops_being_reported_is_flagged(capsys) -> None:
+    """A rename or a dropped field would otherwise pass as "no regression":
+    the metric is simply absent from the new baseline and skipped in silence."""
+    rc = compare(
+        baseline(prov(), hit_at_k=0.90, false_abstention_rate=0.10),
+        baseline(prov(), hit_at_k=0.90),
+        tolerance=0.02,
+    )
+    captured = capsys.readouterr()
+    assert rc == 0
+    assert "no longer gated: false_abstention_rate" in captured.out
+
+
+def test_a_metric_absent_from_the_old_baseline_is_not_flagged(capsys) -> None:
+    # The normal case for a newly added metric; nothing was lost.
+    compare(
+        baseline(prov(), hit_at_k=0.90),
+        baseline(prov(), hit_at_k=0.90, false_abstention_rate=0.10),
+        tolerance=0.02,
+    )
+    assert "no longer gated" not in capsys.readouterr().out
