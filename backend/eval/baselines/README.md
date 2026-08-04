@@ -55,9 +55,16 @@ Mode is `retrieval` or `full`; they are never comparable to each other
 
 | file | kind | why |
 |---|---|---|
-| `tier-b-retrieval-2026-08-03.json` | diagnostic | recorded from a container built before the model-revision env fix, with eval code copied in. Provenance honestly reports `unknown`/`unpinned`. Surfaced finding #27. |
+| `tier-b-retrieval-2026-08-04.json` | **provenance-complete, tier-B only** | every provenance field resolves; image rebuilt so its code matches the recorded sha. Usable as a same-tier comparison point for retrieval-mode changes. Not a *headline* baseline — see below. |
+| `tier-b-retrieval-2026-08-03.json` | diagnostic (superseded) | recorded before the model-revision env fix, with eval code copied in. Provenance honestly reports `unknown`/`unpinned`. Kept because it surfaced finding #27. |
 | `f27-rerank-diagnostic-2026-08-03.json` | diagnostic | not an eval run — per-candidate rerank scores, shapes and rank1/rank2 gaps behind finding #27. Produced by `eval/diagnose_rerank.py`. |
 
-There is **no reference baseline yet**, and there cannot be one until tier A is
+There is **no headline baseline yet**, and there cannot be one until tier A is
 populated: tier B alone is deliberately table-, list- and OCR-heavy, so its
-numbers describe that composition rather than the system.
+numbers describe that composition rather than the system. In particular
+`recall_at_fetch = 1.0` there is arithmetic — 18 chunks against
+`retrieval_fetch_k = 20` means the fetch stage returns the whole corpus every
+time — and it will fall on tier A.
+
+No knob may be tuned against tier-B numbers. Fitting a threshold to a corpus
+that is 60% tables and OCR fits the corpus, not the system.

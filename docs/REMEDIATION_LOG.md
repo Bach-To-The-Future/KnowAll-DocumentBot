@@ -1075,3 +1075,98 @@ means the fetch stage returns **the entire corpus** for every query. Recall of
 1.0 is arithmetic, not evidence of retrieval quality, and it will fall on tier
 A. What survives the caveat is the *shape* of the finding — the gap between
 fetch and final is post-retrieval loss — not the specific value 1.000.
+
+
+## [Phase 1.6] CI eval gate — and what it refuses to pretend
+Status: DONE
+Commit: `dee16fb` · file: `.github/workflows/eval.yml`
+
+Two jobs, deliberately not one job with a mode flag (as directed):
+
+| | `retrieval` | `full` |
+|---|---|---|
+| trigger | PR touching `backend/extraction/**`, `backend/services/**`, `backend/integrations/**`, `backend/core/config.py`, `backend/eval/**` | nightly cron + `workflow_dispatch` |
+| passes | 2 | 3 |
+| tolerance | **zero** | **measured**, reported by the job |
+| cache | default | `ENABLE_ANSWER_CACHE=false` (harness refuses otherwise) |
+
+The retrieval job **fails if its two passes disagree at all**. Retrieval mode
+has no LLM in it, so any spread is nondeterminism nobody has found yet, and it
+would make every future comparison unreliable.
+
+Both jobs ingest into `knowall_eval`, never the production collection —
+`ingest_corpus.py` refuses the default collection outright.
+
+### The gate says what it cannot do
+
+The regression-comparison step scans `eval/baselines/` for a file whose
+provenance contains no `"unknown"` and no `"unpinned"`. When there is none it
+emits a **warning that the regression gate is INACTIVE** and exits 0, rather
+than passing silently. A step that reports success while comparing nothing is
+precisely the green checkmark that lies.
+
+Gated **today**, with no reference baseline: corpus manifest integrity,
+embedding-model identity, golden-set schema, `needs_rewrite()` branch
+agreement, and retrieval determinism.
+Not gated today: metric regression. Requires tier A.
+
+
+## [Phase 1.6] Provenance-complete baseline + a gate that could have vanished
+Status: DONE
+Commit: `dee16fb` · file: `eval/baselines/tier-b-retrieval-2026-08-04.json`
+
+Re-recorded after rebuilding the image (not `docker compose cp` — the code in
+the image must match the sha it records) and recreating the containers. Every
+provenance field now resolves:
+
+    git_sha            56154fecc8e99bdefaf180495683b35ea4f85ae3
+    api_image_digest   sha256:0dd9f3325c1c40df7945d62fa039830028c3db4bd4b766a05d773df0494b49bf
+    reranker_revision  2cfc18c9415c912f9d8155881c133215df768a70
+    bm25_revision      e499a1f8d6bec960aab5533a0941bf914e70faf9
+    embed_model_digest 0a109f422b47e3a30ba2b10eca18548e944e8a23073ee3f3e947efcf3c45e59f
+    corpus_manifest    32610e3d856c6caf5f2d3120c69321fa9192586d5a22f73c3ef38a2dc7f75754
+
+This run was made **fail-closed**: `EXPECTED_EMBED_MODEL_DIGEST` was passed
+explicitly, so F24 enforcement was active rather than warning.
+
+Numbers unchanged from the diagnostic run, and the split pair now states
+plainly what the single number hid:
+
+    recall_at_fetch          1.000
+    hit_at_k                 0.318
+    mrr_at_k                 0.318
+    false_abstention_rate    0.682     <- 68% of answerable questions get "I don't know"
+    correct_abstention_rate  1.000
+    spread across 3 runs     0.0 on every metric
+
+Determinism has now been confirmed on **two separate container builds**, six
+passes total. That is what makes the zero CI tolerance a measurement rather
+than an assumption.
+
+### A gate that could have disappeared silently
+
+Running `compare.py` against the two real baselines rather than only synthetic
+fixtures exposed a hole in it. The old file predates the abstention split, so
+both new metrics were simply **absent** — and the comparator skipped them
+without a word. A rename or a dropped field would have passed as "no
+regression" forever.
+
+It now warns when a metric the OLD baseline gated on is missing from the NEW
+one. The reverse (new metric, old baseline predates it) stays silent, because
+nothing was lost.
+
+End-to-end verification, old vs new:
+
+    verdict: COMPARABLE_WITH_COSMETIC_DRIFT
+      reranker_revision: unpinned -> 2cfc18c9...
+      bm25_revision:     unpinned -> e499a1f8...
+      git_sha:           unknown  -> 56154fec...
+      api_image_digest:  unknown  -> sha256:0dd9f332...
+    [tier_b]
+      ^ recall_at_fetch  1.000 -> 1.000  (+0.000)
+      ^ hit_at_k         0.318 -> 0.318  (+0.000)
+      ^ mrr_at_k         0.318 -> 0.318  (+0.000)
+    OK — no metric regressed beyond tolerance.       exit 0
+
+The comparator correctly classified a build-identity change as cosmetic, named
+every drifted field, and diffed the numbers.
