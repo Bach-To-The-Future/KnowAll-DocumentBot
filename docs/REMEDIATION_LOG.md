@@ -65,7 +65,7 @@ Verdict key: **CONFIRMED** · **ALREADY FIXED** · **INCORRECT — actual state 
 | **24** | **P1** | `nomic-embed-text:latest` is a moving tag and Ollama cannot pull or run by digest, so drift is undetectable. Fixed by ASSERTION (`core/model_identity.py`), not by reference | `/api/tags`; `ollama pull ...@sha256:` → `invalid model name` | **RESOLVED** |
 | **25** | **P2** | Base images pinned by tag and fastembed model repos unpinned — no build was reproducible, so no baseline was either | `api/Dockerfile`, `frontend/Dockerfile` | **RESOLVED** (`4e43c04`) |
 | 26 | P3 | apt-installed tesseract and its traineddata are unpinned; an OCR output change would leave no diff in this repository | `api/Dockerfile` apt layer | **OPEN** — Phase 4, vendor tessdata from a tagged release |
-| **27** | **P2** | `rerank_score_floor` is an absolute cut on a cross-encoder score whose scale tracks chunk SHAPE (prose vs table/list/OCR). Correctly-ranked first-place chunks are discarded and the user sees an abstention | tier-B baseline: `recall@fetch=1.0` vs `hit@k=0.318`, all 15 failures returned 0 chunks; 3/21 on the real corpus, all table/list answers | **OPEN** — proposal pending, no knob touched |
+| **27** | **P1** | `rerank_score_floor` is an absolute cut on a cross-encoder score whose scale tracks chunk SHAPE (prose vs table/list/OCR). Correctly-ranked first-place chunks are discarded and the user sees an abstention | tier-B baseline: `recall@fetch=1.0` vs `hit@k=0.318`, all 15 failures returned 0 chunks; 3/21 on the real corpus, all table/list answers | **OPEN** — P1 (promoted from P2: the entire quality gap is post-retrieval). Diagnostics done, PROPOSAL P-2 pending, no knob touched |
 
 ## 0.3 Finding 15 — correction
 
@@ -902,3 +902,176 @@ Candidate directions, in the order I would test them, none implemented:
 
 Requires a decision before anything is changed. The harness can now produce the
 before/after for any of the three.
+
+
+## F27 promoted to P1 — and three corrections to my own earlier reading
+
+Maintainer promoted F27 from P2 to P1: `recall_at_fetch = 1.0` with
+`hit_at_k = 0.318` means the entire quality gap is **post-retrieval**. The
+correct chunk was in hand every time and something after retrieval discarded
+it. The original audit rated this risk **mitigated**; measurement inverted that.
+
+Before the diagnostics, three things I wrote in the previous entry were wrong or
+over-read. Recording them because the whole point of the instrument was to stop
+me reasoning from a four-query sample.
+
+**Correction 1 — "the correct document ranks first in every case."** It does
+not. Measured over all 22 answerable entries: rank-1 is correct in **20**, not
+22. Two entries rank an incorrect chunk first (`Et le stock de securite ?`,
+`What stock level triggers a replenishment order for the Halifax warehouse?`).
+My claim came from the four queries I happened to print.
+
+**Correction 2 — "by two to three orders of magnitude."** The median rank1/rank2
+ratio for correct rank-1 chunks is **26x**, with a minimum of **1.15x**. Several
+correct answers lead the runner-up by less than 2x. The 500x–5600x figures I
+quoted are the top of the distribution, not the distribution.
+
+**Correction 3 — "the score tracks chunk shape."** Shape is a strong effect but
+not the whole story. Correct rank-1 chunks cut by the floor, by shape:
+
+    list    7/8
+    table   1/1
+    prose   5/11   <- 45% of correct PROSE answers are also cut
+
+A shape-conditioned floor alone would leave half the prose failures in place.
+
+
+## [F27 diagnostic 1] What the cross-encoder is actually handed
+Status: DONE — one hypothesis DISPROVED, a different defect found
+Commit: `a95f2ed` · data: `eval/baselines/f27-rerank-diagnostic-2026-08-03.json`
+
+The hypothesis was that the embedding leg sees heading-enriched text while the
+cross-encoder sees a bare fragment, because heading paths are prepended at
+extraction time and context expansion runs after reranking.
+
+**Disproved.** Ingestion embeds `node.text` and stores `node.text`
+(`services/ingestion.py:_embed_chunks` — `embedding=emb, text=node.text` from
+the same list), and `_rerank_pool` scores `c.text`. The two legs receive
+identical text. There is no divergence to fix.
+
+**What the measurement did find** is a systematic absence, not a divergence:
+
+    rank-1 chunks:                        22
+    ... carrying section_title metadata:   9
+    ... whose TEXT leads with it:          9   (9/9 — enrichment is never stripped)
+    ... with NO section metadata at all:  13
+
+The 13 are exactly the **non-heading-aware extractors** — csv, xlsx, pptx and
+both OCR PDFs. Only `docx_format.py` and `txt.py` build a heading stack and
+prepend a path. For the rest, the leading line of what the cross-encoder scores
+is whatever the format happened to emit:
+
+    b03-sales.csv           'region,quarter,units_sold,revenue_cad'
+    b05-inventory.xlsx      'Sheet: Thresholds'
+    b04-wide-row.csv        'contract_id,summary'
+    b09-scanned-notice.pdf  'ARCHIVED NOTICE'
+    b13-avis-archive-fr.pdf 'AVIS ARCHIVE'
+    b07-review.pptx         'Quarterly Review'
+
+No filename, no document title, no table caption. A cross-encoder trained on
+prose query/passage pairs is being asked to judge `West,Q4,205,2460` against
+"What revenue did the West region record in Q4?" with nothing else to go on.
+
+And the enrichment that would help arrives too late: `_expand_context()` runs at
+`services/retrieval.py:188`, **after** the floor has already been applied at
+line 182. Section-parent text can never influence the decision that discarded
+the chunk.
+
+
+## [F27 diagnostic 2] What the scores actually separate
+Status: DONE
+Commit: `a95f2ed` · tool: `eval/diagnose_rerank.py` (reports only, tunes nothing)
+
+**The absolute score does not separate correct from incorrect.** The ranges
+overlap almost completely:
+
+    rank-1 CORRECT    n=20   min 0.0003   median 0.0821   max 0.9999
+    rank-1 INCORRECT  n=2    min 0.0005   median 0.0020   max 0.0035
+
+**The rank1/rank2 gap separates them better, though not cleanly:**
+
+    rank-1 CORRECT    median 26.3x   min  1.15x
+    rank-1 INCORRECT  median  5.6x   max  8.06x
+
+Keep-criterion comparison over rank-1 only, nothing changed:
+
+| criterion | keeps correct | keeps incorrect |
+|---|---|---|
+| absolute floor ≥ 0.25 | **7/20** | 0/2 |
+| ratio gap ≥ 10x | 10/20 | 0/2 |
+| ratio gap ≥ 5x | 14/20 | 1/2 |
+| absolute gap ≥ 0.01 | **14/20** | 0/2 |
+
+An absolute floor throws the gap signal away entirely. Two criteria double the
+correct-answer retention at no measured cost in incorrect answers.
+
+**Do not read that table as a result.** n=2 for the incorrect group is far too
+small to claim "0 incorrect kept" means anything, and the rows exclude the
+unanswerable set entirely — the population that actually decides whether
+abstention still works. Both gap criteria must be measured end-to-end with
+`false_abstention_rate` and `correct_abstention_rate` before any of them is
+believed. The table's only job is to show the signal exists.
+
+
+## PROPOSAL P-2 — finding #27 (P1). Candidates, not a decision.
+Status: PROPOSAL-PENDING
+
+`bge-reranker-base` is trained on prose query/passage pairs and
+`sigmoid(logit)` is **not a calibrated probability**. "The floor is mistuned" is
+therefore one hypothesis among several, not the conclusion. Four candidates,
+none chosen, each with what would falsify it:
+
+**C1 — Enrich the reranker input.** Prepend document title / sheet / table
+caption for the formats that carry no heading path, so the cross-encoder judges
+a passage rather than a fragment.
+*Attacks:* the 13 rank-1 chunks with no section metadata.
+*Falsified if:* enriched scores for table/list chunks stay in the 0.01–0.2 band.
+*Cost:* changes stored text ⇒ **reindex** ⇒ new corpus provenance, and it is a
+chunking-adjacent change, so it needs its own approval under R5.
+
+**C2 — Gap-based or relative keep-criterion.** Keep rank 1 when it leads rank 2
+by a margin, independent of absolute value; keep lower ranks only above a floor.
+*Attacks:* the 13/20 correct answers the absolute floor discards.
+*Falsified if:* `correct_abstention_rate` collapses — a query with no good
+answer can still produce a large ratio gap between two equally irrelevant
+chunks. The 1.15x correct minimum also means a gap threshold high enough to be
+safe may cut real answers.
+*Cost:* code only, no reindex. Cheapest to measure.
+
+**C3 — Separate the abstention decision from relevance ordering.** Abstain on a
+much lower absolute bar; order what survives by rerank score. Today one
+threshold does both jobs, and the job it is bad at (calibrated absolute
+confidence) is the one that produces the user-facing failure.
+*Attacks:* the conflation itself rather than either symptom.
+*Falsified if:* the low bar admits the distractor documents on unanswerable
+queries.
+*Cost:* code only.
+
+**C4 — Per-query score normalisation.** Normalise across the candidate pool
+(z-score or softmax) and threshold the normalised value, so the cut adapts to a
+query's score scale instead of assuming one global scale.
+*Attacks:* the shape-dependence directly — it is a scale problem, and this
+removes the scale.
+*Falsified if:* it destroys abstention, since normalising always produces a
+"best" candidate however bad the pool.
+*Cost:* code only.
+
+C2, C3 and C4 are cheap and measurable now. C1 is the expensive one and the only
+one that would change the index.
+
+### Gating (as directed)
+
+**Any tuning of the floor stays gated on tier A.** Tier B is deliberately
+table-, list- and OCR-heavy — that composition is *why* the defect surfaced
+there — so a value fitted against tier B would be fitted to the corpus's
+composition, not to the system. That is overfitting with extra steps.
+
+The **diagnostics above are not gated** and are complete.
+
+### Do not over-read `recall_at_fetch = 1.0`
+
+13 synthetic documents producing 18 chunks, with `retrieval_fetch_k = 20`,
+means the fetch stage returns **the entire corpus** for every query. Recall of
+1.0 is arithmetic, not evidence of retrieval quality, and it will fall on tier
+A. What survives the caveat is the *shape* of the finding — the gap between
+fetch and final is post-retrieval loss — not the specific value 1.000.
