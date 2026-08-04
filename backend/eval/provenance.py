@@ -95,6 +95,21 @@ def classify_fields(eval_mode: str) -> tuple[tuple[str, ...], tuple[str, ...], t
 
 
 def _git_sha() -> str:
+    """The env var comes FIRST and is the only path that works in the container.
+
+    The image build context is `backend/`, so there is no `.git` inside the
+    container and `git rev-parse` can never succeed there — every in-container
+    baseline recorded "unknown" until this was fixed. Pass it at the call site:
+
+        docker compose exec -e KNOWALL_GIT_SHA=$(git rev-parse HEAD) api \\
+            python eval/run_eval.py ...
+
+    The subprocess fallback is for host-side runs. Still "unknown" when neither
+    works — an honest gap, not a fabricated value.
+    """
+    from_env = os.getenv("KNOWALL_GIT_SHA", "").strip()
+    if from_env:
+        return from_env
     try:
         out = subprocess.run(
             ["git", "rev-parse", "HEAD"],
@@ -138,8 +153,11 @@ def build(
         "reranker_revision": os.getenv("KNOWALL_RERANKER_REVISION") or "unpinned",
         "bm25_revision": os.getenv("KNOWALL_BM25_REVISION") or "unpinned",
         "git_sha": _git_sha(),
-        "api_image_digest": os.getenv("API_IMAGE_DIGEST", "unknown"),
-        "web_image_digest": os.getenv("WEB_IMAGE_DIGEST", "unknown"),
+        # Also passed in at the call site — a container cannot see its own
+        # image ID without the docker socket, and mounting that to record a
+        # provenance field would be a poor trade.
+        "api_image_digest": os.getenv("KNOWALL_API_IMAGE_ID", "unknown"),
+        "web_image_digest": os.getenv("KNOWALL_WEB_IMAGE_ID", "unknown"),
         # informational only, never compared
         "recorded_at": datetime.now(UTC).isoformat(),
         "python": platform.python_version(),
