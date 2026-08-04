@@ -44,6 +44,11 @@ optimistically; they are what the running container actually reported. A file
 carrying them is a **diagnostic** — useful for finding defects, useless as a
 comparison point. Say which one a file is when you commit it.
 
+**`api_image_digest` is the authoritative identity of the code that ran.**
+`git_sha` is the repository pointer at launch and can run *ahead* of the image
+— `$(git rev-parse HEAD)` describes the working tree, not the build. Rebuild
+before recording, and when two baselines disagree, trust the image digest.
+
 ## Naming
 
     tier-<tier>-<mode>-<YYYY-MM-DD>.json
@@ -55,6 +60,7 @@ Mode is `retrieval` or `full`; they are never comparable to each other
 
 | file | kind | why |
 |---|---|---|
+| `tier-b-full-2026-08-04.json` | **provenance-complete, tier-B only** | full mode, 3 passes, cache disabled, F24 fail-closed. Measured spread 0.0 — **not usable as a tolerance**: finding #27 pins 60% of entries at a score that cannot move, so the metric is insensitive to the LLM variation that demonstrably exists. Records `git_sha` two docs-only commits ahead of the image. |
 | `tier-b-retrieval-2026-08-04.json` | **provenance-complete, tier-B only** | every provenance field resolves; image rebuilt so its code matches the recorded sha. Usable as a same-tier comparison point for retrieval-mode changes. Not a *headline* baseline — see below. |
 | `tier-b-retrieval-2026-08-03.json` | diagnostic (superseded) | recorded before the model-revision env fix, with eval code copied in. Provenance honestly reports `unknown`/`unpinned`. Kept because it surfaced finding #27. |
 | `f27-rerank-diagnostic-2026-08-03.json` | diagnostic | not an eval run — per-candidate rerank scores, shapes and rank1/rank2 gaps behind finding #27. Produced by `eval/diagnose_rerank.py`. |

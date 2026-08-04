@@ -1170,3 +1170,95 @@ End-to-end verification, old vs new:
 
 The comparator correctly classified a build-identity change as cosmetic, named
 every drifted field, and diffed the numbers.
+
+
+## [Phase 1.6] Full-mode variance — measured 0.0, and NOT usable as a tolerance
+Status: DONE (measurement) · **BLOCKED** (tolerance) on finding #27
+Baseline: `eval/baselines/tier-b-full-2026-08-04.json`
+
+Three passes, `ENABLE_ANSWER_CACHE=false`, F24 enforcement fail-closed
+(`EXPECTED_EMBED_MODEL_DIGEST` passed explicitly, so a drifted model would have
+aborted the run rather than warned).
+
+    [tier_b]  recall_at_fetch          1.000
+              hit_at_k                 0.409     (retrieval mode: 0.318)
+              mrr_at_k                 0.409
+              false_abstention_rate    0.545     (retrieval mode: 0.682)
+              correct_abstention_rate  1.000
+
+    variance across 3 runs:  spread 0.0 on EVERY metric.
+
+Rewrite fired on all 5 entries whose branch predicted it, and actually changed
+the text in all 5 (`n_would_fire=5, n_fired=5, branch_mismatches=[]`). Full mode
+is genuinely exercising rewrite and expansion — unlike retrieval mode, where
+`fired=0` by construction.
+
+### The 0.0 is an artifact. Do not encode it as the tolerance.
+
+Zero spread with an LLM in the loop was implausible enough to check rather than
+report. Measured directly, calling the two LLM paths that are actually in the
+retrieval loop 10 times each on identical input:
+
+    query rewrite    "How long does it take before that reaches the duty supervisor?"
+                     -> 3 distinct outputs in 10 calls
+                     "And the disposal rule?"
+                     -> 4 distinct outputs in 10 calls
+    expansion        "What revenue did the West region record in Q4?"
+                     -> 2 distinct outputs in 10 calls
+                     "How long must files be kept before they may be destroyed?"
+                     -> 5 distinct outputs in 10 calls
+
+`llm_temperature = 0.1`, no seed. **The LLM is not deterministic.** The rewrites
+differ substantially — one call produced "What is the policy on disposing of
+hazardous waste?" for a records-retention follow-up, which is a different query
+by any reading.
+
+Separate observation, not acted on: for the retention question the expansion
+step returns **statements rather than queries** in 9 of 10 calls -- e.g. "For
+business purposes, companies often have policies in place regarding the
+retention of documents and records." That is a prompt-adherence problem with a
+1b model, not finding #27, and it is logged here rather than fixed because
+changing the expansion prompt is a generation-prompt change (R5) and because
+nothing can measure the effect while #27 pins 60% of the entries.
+
+So the pipeline is stochastic and the metric did not move. The reason is
+finding #27:
+
+    answerable entries returning 0 chunks   12 / 22   pinned at hit@k = 0
+    unanswerable entries returning 0 chunks  3 /  3   pinned at 1.0
+    ------------------------------------------------------------------
+    entries whose score CANNOT vary         15 / 25 = 60%
+    entries that could express variance     10 / 25 = 40%
+
+and every one of those 10 live entries returned **exactly one** chunk. The score
+floor collapses the result set to 0 or 1 items, so a rewrite would have to flip
+*which single chunk* survives in order to move any metric. That is a very high
+bar, and it is why substantially different queries produce identical numbers.
+
+Corroborating detail: `mrr_at_k == hit_at_k` exactly, in both modes
+(0.318/0.318 and 0.409/0.409). With never more than one result there is no rank
+to reciprocate — **mrr carries no information at all today**, and will not until
+#27 is resolved.
+
+### Consequence
+
+**The full-mode CI tolerance cannot be set yet.** A tolerance of 0.0 derived
+from this run would be a gate that starts failing the day #27 is fixed and
+entries become able to move. Recorded as measured-but-unusable, with the
+mechanism, rather than shipped as a number.
+
+Re-measure after #27 is resolved AND on tier A. Until then the nightly full-mode
+job records and reports the spread without gating on it, which is what the
+workflow already does.
+
+### One provenance caveat, stated rather than hidden
+
+This baseline records `git_sha 8f114488` while the image was built at
+`56154fec`. I passed `$(git rev-parse HEAD)` at launch, and HEAD had moved two
+commits ahead of the image — both documentation-only, so the numbers are
+unaffected. The mechanism nonetheless permits a mismatch.
+
+`api_image_digest` is the authoritative identity of the code that ran;
+`git_sha` is the repository pointer at launch and may run ahead of the image.
+`baselines/README.md` now says so. Anyone diffing two baselines should trust the
+image digest.

@@ -1,0 +1,832 @@
+{
+  "eval_mode": "full",
+  "k": 5,
+  "provenance": {
+    "corpus_manifest_sha256": "32610e3d856c6caf5f2d3120c69321fa9192586d5a22f73c3ef38a2dc7f75754",
+    "embed_model": "nomic-embed-text:latest",
+    "embed_model_digest": "0a109f422b47e3a30ba2b10eca18548e944e8a23073ee3f3e947efcf3c45e59f",
+    "chunk_size": 550,
+    "chunk_overlap": 100,
+    "table_chunk_char_budget": 1600,
+    "table_max_rows_per_chunk": 30,
+    "eval_mode": "full",
+    "reranker_model": "BAAI/bge-reranker-base",
+    "retrieval_fetch_k": 20,
+    "rerank_top_n": 5,
+    "rerank_score_floor": 0.25,
+    "retrieval_context_mode": "section",
+    "neighbor_window": 1,
+    "parent_char_budget": 4000,
+    "enable_multi_query": true,
+    "query_expansion_count": 2,
+    "enable_answer_cache": false,
+    "llm_model": "llama3.2:1b",
+    "reranker_revision": "2cfc18c9415c912f9d8155881c133215df768a70",
+    "bm25_revision": "e499a1f8d6bec960aab5533a0941bf914e70faf9",
+    "git_sha": "8f114488da075acb25f7fda5d35a6ceabc0d25c8",
+    "api_image_digest": "sha256:0dd9f3325c1c40df7945d62fa039830028c3db4bd4b766a05d773df0494b49bf",
+    "web_image_digest": "unknown",
+    "recorded_at": "2026-08-04T17:18:57.882897+00:00",
+    "python": "3.12.13"
+  },
+  "results": {
+    "tier_b": {
+      "n_answerable": 22,
+      "n_abstention": 3,
+      "recall_at_fetch": 1.0,
+      "hit_at_k": 0.409,
+      "mrr_at_k": 0.409,
+      "false_abstention_rate": 0.545,
+      "correct_abstention_rate": 1.0
+    }
+  },
+  "slices": {
+    "category": {
+      "conversational": {
+        "n_answerable": 9,
+        "n_abstention": 0,
+        "recall_at_fetch": 1.0,
+        "hit_at_k": 0.444,
+        "mrr_at_k": 0.444,
+        "false_abstention_rate": 0.444,
+        "correct_abstention_rate": null
+      },
+      "cross-doc": {
+        "n_answerable": 1,
+        "n_abstention": 0,
+        "recall_at_fetch": 1.0,
+        "hit_at_k": 0.0,
+        "mrr_at_k": 0.0,
+        "false_abstention_rate": 1.0,
+        "correct_abstention_rate": null
+      },
+      "long-table-tail": {
+        "n_answerable": 2,
+        "n_abstention": 0,
+        "recall_at_fetch": 1.0,
+        "hit_at_k": 1.0,
+        "mrr_at_k": 1.0,
+        "false_abstention_rate": 0.0,
+        "correct_abstention_rate": null
+      },
+      "multi-hop": {
+        "n_answerable": 1,
+        "n_abstention": 0,
+        "recall_at_fetch": 1.0,
+        "hit_at_k": 0.0,
+        "mrr_at_k": 0.0,
+        "false_abstention_rate": 1.0,
+        "correct_abstention_rate": null
+      },
+      "ocr-answer": {
+        "n_answerable": 2,
+        "n_abstention": 0,
+        "recall_at_fetch": 1.0,
+        "hit_at_k": 0.0,
+        "mrr_at_k": 0.0,
+        "false_abstention_rate": 1.0,
+        "correct_abstention_rate": null
+      },
+      "plain-fact": {
+        "n_answerable": 4,
+        "n_abstention": 0,
+        "recall_at_fetch": 1.0,
+        "hit_at_k": 0.75,
+        "mrr_at_k": 0.75,
+        "false_abstention_rate": 0.25,
+        "correct_abstention_rate": null
+      },
+      "table-answer": {
+        "n_answerable": 3,
+        "n_abstention": 0,
+        "recall_at_fetch": 1.0,
+        "hit_at_k": 0.0,
+        "mrr_at_k": 0.0,
+        "false_abstention_rate": 1.0,
+        "correct_abstention_rate": null
+      },
+      "unanswerable": {
+        "n_answerable": 0,
+        "n_abstention": 3,
+        "recall_at_fetch": null,
+        "hit_at_k": null,
+        "mrr_at_k": null,
+        "false_abstention_rate": null,
+        "correct_abstention_rate": 1.0
+      }
+    },
+    "language": {
+      "en": {
+        "n_answerable": 16,
+        "n_abstention": 2,
+        "recall_at_fetch": 1.0,
+        "hit_at_k": 0.438,
+        "mrr_at_k": 0.438,
+        "false_abstention_rate": 0.562,
+        "correct_abstention_rate": 1.0
+      },
+      "fr": {
+        "n_answerable": 6,
+        "n_abstention": 1,
+        "recall_at_fetch": 1.0,
+        "hit_at_k": 0.333,
+        "mrr_at_k": 0.333,
+        "false_abstention_rate": 0.5,
+        "correct_abstention_rate": 1.0
+      }
+    },
+    "lexical_overlap": {
+      "low": {
+        "n_answerable": 16,
+        "n_abstention": 0,
+        "recall_at_fetch": 1.0,
+        "hit_at_k": 0.375,
+        "mrr_at_k": 0.375,
+        "false_abstention_rate": 0.625,
+        "correct_abstention_rate": null
+      },
+      "high": {
+        "n_answerable": 6,
+        "n_abstention": 0,
+        "recall_at_fetch": 1.0,
+        "hit_at_k": 0.5,
+        "mrr_at_k": 0.5,
+        "false_abstention_rate": 0.333,
+        "correct_abstention_rate": null
+      }
+    }
+  },
+  "rewrite": {
+    "n_would_fire": 5,
+    "n_fired": 5,
+    "n_branch_asserted": 25,
+    "branch_mismatches": []
+  },
+  "rows": [
+    {
+      "question": "How long must files be kept before they may be destroyed?",
+      "language": "en",
+      "tier": "b",
+      "category": "plain-fact",
+      "has_history": false,
+      "returned": 0,
+      "rewrite_would_fire": false,
+      "rewrite_fired": false,
+      "standalone_question": "How long must files be kept before they may be destroyed?",
+      "expanded_queries": [
+        "For business purposes, companies often have policies in place regarding the retention of documents and records.",
+        "The length of time a file can be kept before it is considered for destruction depends on various factors, including industry regulations, company policies, and legal requirements."
+      ],
+      "expects_rewrite": false,
+      "rewrite_branch_ok": true,
+      "kind": "answerable",
+      "falsely_abstained": true,
+      "lexical_overlap": 0.0,
+      "low_overlap": true,
+      "recall_at_fetch": true,
+      "hit_at_k": false,
+      "reciprocal_rank": 0.0,
+      "top_score": null
+    },
+    {
+      "question": "After what delay does an open case reach the duty supervisor?",
+      "language": "en",
+      "tier": "b",
+      "category": "plain-fact",
+      "has_history": false,
+      "returned": 1,
+      "rewrite_would_fire": false,
+      "rewrite_fired": false,
+      "standalone_question": "After what delay does an open case reach the duty supervisor?",
+      "expanded_queries": [
+        "delay after open case",
+        "delay until open case reaches duty supervisor"
+      ],
+      "expects_rewrite": false,
+      "rewrite_branch_ok": true,
+      "kind": "answerable",
+      "falsely_abstained": false,
+      "lexical_overlap": 0.429,
+      "low_overlap": false,
+      "recall_at_fetch": true,
+      "hit_at_k": true,
+      "reciprocal_rank": 1.0,
+      "top_score": 0.6019
+    },
+    {
+      "question": "When does a badge stop working for someone who never uses it?",
+      "language": "en",
+      "tier": "b",
+      "category": "plain-fact",
+      "has_history": false,
+      "returned": 1,
+      "rewrite_would_fire": false,
+      "rewrite_fired": false,
+      "standalone_question": "When does a badge stop working for someone who never uses it?",
+      "expanded_queries": [
+        "Badge still works on him indefinitely."
+      ],
+      "expects_rewrite": false,
+      "rewrite_branch_ok": true,
+      "kind": "answerable",
+      "falsely_abstained": false,
+      "lexical_overlap": 0.167,
+      "low_overlap": true,
+      "recall_at_fetch": true,
+      "hit_at_k": true,
+      "reciprocal_rank": 1.0,
+      "top_score": 0.6004
+    },
+    {
+      "question": "What proportion of customers left during the quarter?",
+      "language": "en",
+      "tier": "b",
+      "category": "plain-fact",
+      "has_history": false,
+      "returned": 1,
+      "rewrite_would_fire": false,
+      "rewrite_fired": false,
+      "standalone_question": "What proportion of customers left during the quarter?",
+      "expanded_queries": [
+        "How did customer satisfaction rate during the last quarter?",
+        "What percentage of our customers departed over the past three months?"
+      ],
+      "expects_rewrite": false,
+      "rewrite_branch_ok": true,
+      "kind": "answerable",
+      "falsely_abstained": false,
+      "lexical_overlap": 0.0,
+      "low_overlap": true,
+      "recall_at_fetch": true,
+      "hit_at_k": true,
+      "reciprocal_rank": 1.0,
+      "top_score": 0.5842
+    },
+    {
+      "question": "What revenue did the West region record in Q4?",
+      "language": "en",
+      "tier": "b",
+      "category": "table-answer",
+      "has_history": false,
+      "returned": 0,
+      "rewrite_would_fire": false,
+      "rewrite_fired": false,
+      "standalone_question": "What revenue did the West region record in Q4?",
+      "expanded_queries": [
+        "West revenue Q4",
+        "West revenue fourth quarter"
+      ],
+      "expects_rewrite": false,
+      "rewrite_branch_ok": true,
+      "kind": "answerable",
+      "falsely_abstained": true,
+      "lexical_overlap": 0.4,
+      "low_overlap": false,
+      "recall_at_fetch": true,
+      "hit_at_k": false,
+      "reciprocal_rank": 0.0,
+      "top_score": null
+    },
+    {
+      "question": "At what stock level should a replenishment order be raised?",
+      "language": "en",
+      "tier": "b",
+      "category": "table-answer",
+      "has_history": false,
+      "returned": 0,
+      "rewrite_would_fire": false,
+      "rewrite_fired": false,
+      "standalone_question": "At what stock level should a replenishment order be raised?",
+      "expanded_queries": [
+        "When the inventory falls below a certain threshold.",
+        "At the point of depletion."
+      ],
+      "expects_rewrite": false,
+      "rewrite_branch_ok": true,
+      "kind": "answerable",
+      "falsely_abstained": true,
+      "lexical_overlap": 0.0,
+      "low_overlap": true,
+      "recall_at_fetch": true,
+      "hit_at_k": false,
+      "reciprocal_rank": 0.0,
+      "top_score": null
+    },
+    {
+      "question": "How many hours long is the billing maintenance window?",
+      "language": "en",
+      "tier": "b",
+      "category": "table-answer",
+      "has_history": false,
+      "returned": 0,
+      "rewrite_would_fire": false,
+      "rewrite_fired": false,
+      "standalone_question": "How many hours long is the billing maintenance window?",
+      "expanded_queries": [
+        "hour maintenance window",
+        "day billing cycle"
+      ],
+      "expects_rewrite": false,
+      "rewrite_branch_ok": true,
+      "kind": "answerable",
+      "falsely_abstained": true,
+      "lexical_overlap": 0.6,
+      "low_overlap": false,
+      "recall_at_fetch": true,
+      "hit_at_k": false,
+      "reciprocal_rank": 0.0,
+      "top_score": null
+    },
+    {
+      "question": "How much notice is needed to end contract CT-9001?",
+      "language": "en",
+      "tier": "b",
+      "category": "long-table-tail",
+      "has_history": false,
+      "returned": 1,
+      "rewrite_would_fire": false,
+      "rewrite_fired": false,
+      "standalone_question": "How much notice is needed to end contract CT-9001?",
+      "expanded_queries": [
+        "How long is the notice period for terminating a contract under CT-9001?",
+        "What is the minimum amount of notice required to terminate a contract in accordance with CT-9001?"
+      ],
+      "expects_rewrite": false,
+      "rewrite_branch_ok": true,
+      "kind": "answerable",
+      "falsely_abstained": false,
+      "lexical_overlap": 0.167,
+      "low_overlap": true,
+      "recall_at_fetch": true,
+      "hit_at_k": true,
+      "reciprocal_rank": 1.0,
+      "top_score": 0.4475
+    },
+    {
+      "question": "What is the indemnity ceiling on contract CT-9001?",
+      "language": "en",
+      "tier": "b",
+      "category": "long-table-tail",
+      "has_history": false,
+      "returned": 1,
+      "rewrite_would_fire": false,
+      "rewrite_fired": false,
+      "standalone_question": "What is the indemnity ceiling on contract CT-9001?",
+      "expanded_queries": [
+        "What is the maximum amount that can be recovered as compensation in a contract CT-9001?",
+        "What is the maximum amount of compensation that can be recovered from a contractor in a CT-9001 contract?"
+      ],
+      "expects_rewrite": false,
+      "rewrite_branch_ok": true,
+      "kind": "answerable",
+      "falsely_abstained": false,
+      "lexical_overlap": 0.4,
+      "low_overlap": false,
+      "recall_at_fetch": true,
+      "hit_at_k": true,
+      "reciprocal_rank": 1.0,
+      "top_score": 0.9999
+    },
+    {
+      "question": "What is the maximum award available under the heritage programme?",
+      "language": "en",
+      "tier": "b",
+      "category": "ocr-answer",
+      "has_history": false,
+      "returned": 0,
+      "rewrite_would_fire": false,
+      "rewrite_fired": false,
+      "standalone_question": "What is the maximum award available under the heritage programme?",
+      "expanded_queries": [
+        "More general version:",
+        "What is the largest prize offered by the heritage program?"
+      ],
+      "expects_rewrite": false,
+      "rewrite_branch_ok": true,
+      "kind": "answerable",
+      "falsely_abstained": true,
+      "lexical_overlap": 0.167,
+      "low_overlap": true,
+      "recall_at_fetch": true,
+      "hit_at_k": false,
+      "reciprocal_rank": 0.0,
+      "top_score": null
+    },
+    {
+      "question": "Jusqu'a quelle date les dossiers peuvent-ils etre deposes ?",
+      "language": "fr",
+      "tier": "b",
+      "category": "ocr-answer",
+      "has_history": false,
+      "returned": 0,
+      "rewrite_would_fire": false,
+      "rewrite_fired": false,
+      "standalone_question": "Jusqu'a quelle date les dossiers peuvent-ils etre deposes ?",
+      "expanded_queries": [
+        "Quelle est la limite du stockage des documents",
+        "À combien de dates peuvent être conservés les archives"
+      ],
+      "expects_rewrite": false,
+      "rewrite_branch_ok": true,
+      "kind": "answerable",
+      "falsely_abstained": true,
+      "lexical_overlap": 0.167,
+      "low_overlap": true,
+      "recall_at_fetch": true,
+      "hit_at_k": false,
+      "reciprocal_rank": 0.0,
+      "top_score": null
+    },
+    {
+      "question": "How much time passes in total between discovery and supervisor involvement?",
+      "language": "en",
+      "tier": "b",
+      "category": "multi-hop",
+      "has_history": false,
+      "returned": 0,
+      "rewrite_would_fire": false,
+      "rewrite_fired": false,
+      "standalone_question": "How much time passes in total between discovery and supervisor involvement?",
+      "expanded_queries": [
+        "How long does it take from the moment a problem is discovered to when someone higher up gets involved?",
+        "How many days or weeks pass until an issue is addressed by someone with more authority?"
+      ],
+      "expects_rewrite": false,
+      "rewrite_branch_ok": true,
+      "kind": "answerable",
+      "falsely_abstained": true,
+      "lexical_overlap": 0.286,
+      "low_overlap": true,
+      "recall_at_fetch": true,
+      "hit_at_k": false,
+      "reciprocal_rank": 0.0,
+      "top_score": null
+    },
+    {
+      "question": "Are incident write-ups kept, and for how long?",
+      "language": "en",
+      "tier": "b",
+      "category": "cross-doc",
+      "has_history": false,
+      "returned": 0,
+      "rewrite_would_fire": false,
+      "rewrite_fired": false,
+      "standalone_question": "Are incident write-ups kept, and for how long?",
+      "expanded_queries": [
+        "incident reports are typically kept for a certain period of time after they are written up.",
+        "incident reports are usually retained for 5 years from the date of completion."
+      ],
+      "expects_rewrite": false,
+      "rewrite_branch_ok": true,
+      "kind": "answerable",
+      "falsely_abstained": true,
+      "lexical_overlap": 0.0,
+      "low_overlap": true,
+      "recall_at_fetch": true,
+      "hit_at_k": false,
+      "reciprocal_rank": 0.0,
+      "top_score": null
+    },
+    {
+      "question": "Which day of the month is reserved for planned downtime?",
+      "language": "en",
+      "tier": "b",
+      "category": "conversational",
+      "has_history": false,
+      "returned": 0,
+      "rewrite_would_fire": false,
+      "rewrite_fired": false,
+      "standalone_question": "Which day of the month is reserved for planned downtime?",
+      "expanded_queries": [
+        "Scheduled maintenance days vary by company but often fall on a weekday."
+      ],
+      "expects_rewrite": false,
+      "rewrite_branch_ok": true,
+      "kind": "answerable",
+      "falsely_abstained": true,
+      "lexical_overlap": 0.0,
+      "low_overlap": true,
+      "recall_at_fetch": true,
+      "hit_at_k": false,
+      "reciprocal_rank": 0.0,
+      "top_score": null
+    },
+    {
+      "question": "Quel est le montant maximal accorde par ce programme patrimonial ?",
+      "language": "fr",
+      "tier": "b",
+      "category": "conversational",
+      "has_history": false,
+      "returned": 0,
+      "rewrite_would_fire": false,
+      "rewrite_fired": false,
+      "standalone_question": "Quel est le montant maximal accorde par ce programme patrimonial ?",
+      "expanded_queries": [
+        "Le montant maximal accordé par ce programme patrimonial peut varier en fonction des conditions de l'offre et du contrat signé entre les parties.",
+        "Cependant, il est généralement possible d'accorder jusqu'à 100 000 euros."
+      ],
+      "expects_rewrite": false,
+      "rewrite_branch_ok": true,
+      "kind": "answerable",
+      "falsely_abstained": true,
+      "lexical_overlap": 0.0,
+      "low_overlap": true,
+      "recall_at_fetch": true,
+      "hit_at_k": false,
+      "reciprocal_rank": 0.0,
+      "top_score": null
+    },
+    {
+      "question": "And the disposal rule?",
+      "language": "en",
+      "tier": "b",
+      "category": "conversational",
+      "has_history": true,
+      "returned": 1,
+      "rewrite_would_fire": true,
+      "rewrite_fired": true,
+      "standalone_question": "What kind of records is covered under the retention policy?",
+      "expanded_queries": [
+        "standard records",
+        "business records"
+      ],
+      "expects_rewrite": true,
+      "rewrite_branch_ok": true,
+      "kind": "answerable",
+      "falsely_abstained": false,
+      "lexical_overlap": 0.5,
+      "low_overlap": false,
+      "recall_at_fetch": true,
+      "hit_at_k": true,
+      "reciprocal_rank": 1.0,
+      "top_score": 0.5222
+    },
+    {
+      "question": "Et le stock de securite ?",
+      "language": "fr",
+      "tier": "b",
+      "category": "conversational",
+      "has_history": true,
+      "returned": 1,
+      "rewrite_would_fire": true,
+      "rewrite_fired": true,
+      "standalone_question": "What does the reorder point list?",
+      "expanded_queries": [
+        "What is the reorder point list used for",
+        "Tracking inventory levels to ensure adequate stock"
+      ],
+      "expects_rewrite": true,
+      "rewrite_branch_ok": true,
+      "kind": "answerable",
+      "falsely_abstained": false,
+      "lexical_overlap": 0.5,
+      "low_overlap": false,
+      "recall_at_fetch": true,
+      "hit_at_k": false,
+      "reciprocal_rank": 0.0,
+      "top_score": 0.6816
+    },
+    {
+      "question": "How long does it take before that reaches the duty supervisor?",
+      "language": "en",
+      "tier": "b",
+      "category": "conversational",
+      "has_history": true,
+      "returned": 1,
+      "rewrite_would_fire": true,
+      "rewrite_fired": true,
+      "standalone_question": "How long does it take for the duty supervisor to receive an incident report?",
+      "expanded_queries": [
+        "How long does it take for the duty supervisor to receive an incident report in a busy workplace?",
+        "How long does it take for the duty supervisor to respond to an emergency call at work?"
+      ],
+      "expects_rewrite": true,
+      "rewrite_branch_ok": true,
+      "kind": "answerable",
+      "falsely_abstained": false,
+      "lexical_overlap": 0.333,
+      "low_overlap": true,
+      "recall_at_fetch": true,
+      "hit_at_k": true,
+      "reciprocal_rank": 1.0,
+      "top_score": 0.9502
+    },
+    {
+      "question": "Est-ce que cette limite vaut aussi pour les demandes tardives ?",
+      "language": "fr",
+      "tier": "b",
+      "category": "conversational",
+      "has_history": true,
+      "returned": 1,
+      "rewrite_would_fire": true,
+      "rewrite_fired": true,
+      "standalone_question": "Quel est le montant de la limite de subvention patrimoniale ?",
+      "expanded_queries": [
+        "La limite de subvention patrimoniale varie selon les juridictions et les régions.",
+        "Le montant exact peut être déterminé par l'organisme chargé de la régulation des finances publiques."
+      ],
+      "expects_rewrite": true,
+      "rewrite_branch_ok": true,
+      "kind": "answerable",
+      "falsely_abstained": false,
+      "lexical_overlap": 0.0,
+      "low_overlap": true,
+      "recall_at_fetch": true,
+      "hit_at_k": true,
+      "reciprocal_rank": 1.0,
+      "top_score": 0.5193
+    },
+    {
+      "question": "What stock level triggers a replenishment order for the Halifax warehouse?",
+      "language": "en",
+      "tier": "b",
+      "category": "conversational",
+      "has_history": true,
+      "returned": 0,
+      "rewrite_would_fire": false,
+      "rewrite_fired": false,
+      "standalone_question": "What stock level triggers a replenishment order for the Halifax warehouse?",
+      "expanded_queries": [
+        "stock low enough to warrant reordering",
+        "stock below minimum threshold for inventory management"
+      ],
+      "expects_rewrite": false,
+      "rewrite_branch_ok": true,
+      "kind": "answerable",
+      "falsely_abstained": true,
+      "lexical_overlap": 0.0,
+      "low_overlap": true,
+      "recall_at_fetch": true,
+      "hit_at_k": false,
+      "reciprocal_rank": 0.0,
+      "top_score": null
+    },
+    {
+      "question": "Quelle est la periode de preavis prevue au contrat CT-9001 ?",
+      "language": "fr",
+      "tier": "b",
+      "category": "conversational",
+      "has_history": true,
+      "returned": 0,
+      "rewrite_would_fire": false,
+      "rewrite_fired": false,
+      "standalone_question": "Quelle est la periode de preavis prevue au contrat CT-9001 ?",
+      "expanded_queries": [
+        "Quelques phrases alternatives :",
+        "Periode préavis prévue sur le contrat CT-9001"
+      ],
+      "expects_rewrite": false,
+      "rewrite_branch_ok": true,
+      "kind": "answerable",
+      "falsely_abstained": true,
+      "lexical_overlap": 0.0,
+      "low_overlap": true,
+      "recall_at_fetch": true,
+      "hit_at_k": false,
+      "reciprocal_rank": 0.0,
+      "top_score": null
+    },
+    {
+      "question": "Combien de temps faut-il pour accuser reception d'un billet prioritaire ?",
+      "language": "fr",
+      "tier": "b",
+      "category": "conversational",
+      "has_history": true,
+      "returned": 1,
+      "rewrite_would_fire": true,
+      "rewrite_fired": true,
+      "standalone_question": "Combien de temps faut-il pour obtenir un billet prioritaire ?",
+      "expanded_queries": [
+        "Quelques phrases synonymes ou plus/ moins spécifiques :",
+        "Quels sont les délais pour obtenir le billet prioritaire ?"
+      ],
+      "expects_rewrite": true,
+      "rewrite_branch_ok": true,
+      "kind": "answerable",
+      "falsely_abstained": false,
+      "lexical_overlap": 0.0,
+      "low_overlap": true,
+      "recall_at_fetch": true,
+      "hit_at_k": true,
+      "reciprocal_rank": 1.0,
+      "top_score": 0.802
+    },
+    {
+      "question": "How many parking permits were issued last September?",
+      "language": "en",
+      "tier": "b",
+      "category": "unanswerable",
+      "has_history": false,
+      "returned": 0,
+      "rewrite_would_fire": false,
+      "rewrite_fired": false,
+      "standalone_question": "How many parking permits were issued last September?",
+      "expanded_queries": [
+        "More general version: What number of parking permits were given out in the fall?",
+        "More specific version: Approximately how many parking permits were issued to drivers in September?"
+      ],
+      "expects_rewrite": false,
+      "rewrite_branch_ok": true,
+      "kind": "abstention",
+      "abstained_correctly": true,
+      "top_score": null
+    },
+    {
+      "question": "What is the annual budget for the advanced training modules?",
+      "language": "en",
+      "tier": "b",
+      "category": "unanswerable",
+      "has_history": false,
+      "returned": 0,
+      "rewrite_would_fire": false,
+      "rewrite_fired": false,
+      "standalone_question": "What is the annual budget for the advanced training modules?",
+      "expanded_queries": [
+        "Annual Training Budget",
+        "Advanced Training Module Expenses"
+      ],
+      "expects_rewrite": false,
+      "rewrite_branch_ok": true,
+      "kind": "abstention",
+      "abstained_correctly": true,
+      "top_score": null
+    },
+    {
+      "question": "Quel taux de change s'applique aux subventions versees a l'etranger ?",
+      "language": "fr",
+      "tier": "b",
+      "category": "unanswerable",
+      "has_history": false,
+      "returned": 0,
+      "rewrite_would_fire": false,
+      "rewrite_fired": false,
+      "standalone_question": "Quel taux de change s'applique aux subventions versees a l'etranger ?",
+      "expanded_queries": [
+        "Taux de change applicable aux versements versés à l'étranger"
+      ],
+      "expects_rewrite": false,
+      "rewrite_branch_ok": true,
+      "kind": "abstention",
+      "abstained_correctly": true,
+      "top_score": null
+    }
+  ],
+  "variance": {
+    "tier_b.recall_at_fetch": {
+      "values": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "min": 1.0,
+      "max": 1.0,
+      "spread": 0.0,
+      "stdev": 0.0
+    },
+    "tier_b.hit_at_k": {
+      "values": [
+        0.409,
+        0.409,
+        0.409
+      ],
+      "min": 0.409,
+      "max": 0.409,
+      "spread": 0.0,
+      "stdev": 0.0
+    },
+    "tier_b.mrr_at_k": {
+      "values": [
+        0.409,
+        0.409,
+        0.409
+      ],
+      "min": 0.409,
+      "max": 0.409,
+      "spread": 0.0,
+      "stdev": 0.0
+    },
+    "tier_b.false_abstention_rate": {
+      "values": [
+        0.545,
+        0.545,
+        0.545
+      ],
+      "min": 0.545,
+      "max": 0.545,
+      "spread": 0.0,
+      "stdev": 0.0
+    },
+    "tier_b.correct_abstention_rate": {
+      "values": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "min": 1.0,
+      "max": 1.0,
+      "spread": 0.0,
+      "stdev": 0.0
+    },
+    "max_spread": 0.0
+  }
+}
