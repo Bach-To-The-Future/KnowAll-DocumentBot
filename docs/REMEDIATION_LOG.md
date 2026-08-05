@@ -1965,3 +1965,90 @@ different composition. Neither is an artifact of the synthetic corpus, and
 Phase 1A inherits both as things to test against real documents rather than
 things to re-derive.
 
+## [Phase 2.1] Reindex EXECUTED — all four confirmations pass
+Status: DONE · commits `4b619e0` (identity + marker), `6949095` (verification)
+
+    376 chunks reindexed from 13/13 documents
+    verified 376 points in knowall_collection
+    DIGEST_ENFORCEMENT_FROM=2026-08-05T08:53:05.779915+00:00
+
+Chunk count is **identical** to before (376), which is the check that the
+migration rewrote the corpus rather than changing it.
+
+Preconditions met before executing: snapshot taken and **restore-verified**
+(376 out, 376 back into a throwaway collection, throwaway deleted); dry run
+clean; pre-reindex probe recorded; runbook written. Images were **rebuilt**
+first so the migration ran committed code rather than files copied into a live
+container.
+
+### 1. Identity on every point — PASS
+
+    points without a digest : 0
+    distinct digests        : {0a109f422b47...: 376}
+    distinct embed_model    : {nomic-embed-text:latest: 376}
+
+Exactly ONE digest across the collection. More than one would mean it mixes
+vectors from different models, which is the condition finding #2 existed to
+make visible.
+
+### 2. Missing digest is fatal under enforcement — PASS
+
+Exercised live, not only in unit tests. `DIGEST_ENFORCEMENT_FROM` is now set in
+**both** the api and worker environment maps in `docker-compose.yml` (not the
+shell — compose does not pass that through), and the stack came back healthy
+with it active.
+
+### 3. Finding #29 metadata — PASS, and it exposed the scale of what is left
+
+First time this has been observable at all: the 376 points predated F29.
+
+    csv     72/72   carry section_title   <- previously ZERO
+    xlsx      9/9   carry section_title   <- previously ZERO
+    docx    73/73   carry section_title
+    txt       8/8   carry section_title
+    pdf      0/214  carry section_title
+    pptx    not present in this collection
+
+> **214 of 376 points — 57% of the collection — are PDF and still carry no
+> section metadata.**
+
+That was a deliberate exclusion (per-page sections would be singletons, worse
+than the ±1 window PDFs use today), but until now its scale was invisible. On
+this corpus the F29 fix covers 43% of points and the majority remain bare.
+
+That materially changes the **C1** calculus in proposal P-2: C1 depends on
+having something to prepend, and for the largest share of this collection there
+is still nothing. C1 on real data therefore needs a PDF answer — document title
+or page heading — that F29 did not provide. Recorded against P-2.
+
+### 4. F19 — the boundary is NOT being crossed
+
+Measured immediately post-reindex, on the maintainer's point that the reindex
+re-embeds everything, so any crossing would already have silently truncated
+during the migration.
+
+    method: bge-reranker WordPiece (PROXY — see caveat)
+    tokens  min=5   median=403   p95=649   max=1056
+    chars   min=5   median=1420  max=2991
+    chunks OVER 2048 tokens : 0
+    chunks within 20% of it : 0
+
+**No truncation occurred.** The largest chunk is ~1056 tokens, about half the
+limit. So finding #19 is a **guard against future chunking changes, not an
+active data loss** on this corpus — which is a materially weaker claim than the
+one filed, and the right one.
+
+The headroom is not large. `chunk_size` is 550 chars and
+`table_chunk_char_budget` is 1600, yet the largest observed chunk is 2991 chars
+— section prefixes and table row-groups stack. **Roughly a 2x increase in any
+chunk budget would cross the boundary**, which is exactly the change the guard
+must catch.
+
+**Caveat, stated because the number would otherwise be over-trusted:**
+nomic-embed-text's own tokenizer is not in the image. This uses the cached
+bge-reranker WordPiece tokenizer — same BERT family, not the same vocabulary.
+Good enough to answer "is 2048 crossed" when the answer is 1056; it would NOT
+be good enough at 1900, and in that case the honest method is empirical: embed
+a full chunk and a truncated prefix and compare, which is how #19 was proven
+originally.
+

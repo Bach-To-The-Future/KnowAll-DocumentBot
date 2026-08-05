@@ -132,6 +132,12 @@ services:
       # Bare hex digest as reported by Ollama /api/tags (NO sha256: prefix).
       # Unset = loud warning; set = hard fail on drift (finding #24).
       EXPECTED_EMBED_MODEL_DIGEST: ${EXPECTED_EMBED_MODEL_DIGEST:-}
+      # Phase 2.1 reindex completed 2026-08-05: all 376 points verified to
+      # carry embed_model_digest by a full collection scroll. From this marker
+      # on, a point WITHOUT a digest is one that escaped the reindex, not an
+      # unknown one, and verify_three_way() treats it as fatal. Clear this if
+      # a reindex is ever known to be incomplete. See docs/RUNBOOK-reindex.md.
+      DIGEST_ENFORCEMENT_FROM: ${DIGEST_ENFORCEMENT_FROM:-2026-08-05T08:53:05.779915+00:00}
       RERANKER_MODEL: ${RERANKER_MODEL:-BAAI/bge-reranker-base}
       ENABLE_OCR: ${ENABLE_OCR:-true}
       INGEST_BATCH_SIZE: ${INGEST_BATCH_SIZE:-256}
@@ -182,6 +188,12 @@ services:
       # Bare hex digest as reported by Ollama /api/tags (NO sha256: prefix).
       # Unset = loud warning; set = hard fail on drift (finding #24).
       EXPECTED_EMBED_MODEL_DIGEST: ${EXPECTED_EMBED_MODEL_DIGEST:-}
+      # Phase 2.1 reindex completed 2026-08-05: all 376 points verified to
+      # carry embed_model_digest by a full collection scroll. From this marker
+      # on, a point WITHOUT a digest is one that escaped the reindex, not an
+      # unknown one, and verify_three_way() treats it as fatal. Clear this if
+      # a reindex is ever known to be incomplete. See docs/RUNBOOK-reindex.md.
+      DIGEST_ENFORCEMENT_FROM: ${DIGEST_ENFORCEMENT_FROM:-2026-08-05T08:53:05.779915+00:00}
       RERANKER_MODEL: ${RERANKER_MODEL:-BAAI/bge-reranker-base}
       ENABLE_OCR: ${ENABLE_OCR:-true}
       API_KEY: ${API_KEY}
