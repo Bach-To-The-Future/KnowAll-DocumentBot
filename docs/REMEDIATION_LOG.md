@@ -70,6 +70,7 @@ Verdict key: **CONFIRMED** · **ALREADY FIXED** · **INCORRECT — actual state 
 | **29** | P2 | csv, xlsx and pptx chunks carry no `section_title` at all, so section expansion degraded to a ±1 window and the reranker saw bare row-groups | 13/22 rank-1 chunks on tier B had no section metadata | **FIXED** (`64b9a35`) |
 | **30** | P2 | `_expand_context()` runs AFTER the score floor, so enrichment can never influence the discard decision | `retrieval.py:182` floor vs `:188` expand | **PINNED, not fixed** (`414de43`) — the fix IS P-2 candidate C1 |
 | **31** | **P1** | A cross-encoder scores TOPICAL RELEVANCE, not ANSWER PRESENCE. Near-miss unanswerable queries score 0.70-0.997 — higher than most correct answers — so no absolute score bar can separate "about your question" from "answers your question". The GENERATOR does not catch them either: 0 of 4, two fabrications with citations and two degenerate outputs | C3 run scores 0.6986 / 0.9557 / 0.9568 / 0.9968; full-mode generator test declined on 2/10, both being entries where retrieval returned nothing | **OPEN, P1 confirmed** — converges with #5 |
+| **32** | P2 | Degenerate generation: the model emits citation markers and nothing else (`[1] [1][3]`), which is neither an answer nor an abstention and reaches the user as an empty answer bubble | F31 generator test: 2 of 4 near-misses | **OPEN** — fix in 2.4 alongside finding #5's citation verification |
 
 ## 0.3 Finding 15 — correction
 
@@ -1813,3 +1814,62 @@ improve on this corpus, which means:
 
 Phase 3 must not schedule them before tier A exists. C1/#30 additionally carry
 the reindex plus longer-reranking cost, which must be stated together.
+
+## F32 (P2) — degenerate citation-only generation
+Status: OPEN, scheduled for 2.4 with finding #5
+
+Split out of F31 at the maintainer's direction, because it is a **different
+defect with a different fix**. Two of the four near-miss probes returned:
+
+    [1] [1][3]
+
+Citation markers, no prose. That is neither an answer nor an abstention. It
+passes every existing check — non-empty, correctly sized, contains citations —
+and reaches the user as an empty answer bubble.
+
+**Agreed fix (2.4):** detect it as a *malformed generation* — non-citation
+content below a trivial length — treat it as a **failed** generation, and fall
+back to `NO_ANSWER_MESSAGE` rather than streaming an empty bubble. It belongs
+next to finding #5's citation verification because both are checks on the
+generated text against what the context supports, and both need the same hook.
+
+Note the shape of this: it is the same class as finding #28. A guard that
+checks for emptiness and length but not for *content* passes fluent-looking
+output that carries no information. #28 was the query-rewrite instance; this is
+the generation instance.
+
+
+## Metric limitation — `correct_abstention_rate` cannot detect abstention-by-misreading
+Status: RECORDED, deliberately not fixed
+
+The absent-specific entry *"How many parking permits were issued last
+September?"* produced:
+
+> *"According to the provided documents, in September 2023, there are no parking
+> permit reissues mentioned. Therefore, I could not find this information in the
+> provided documents."*
+
+The **conclusion is correct**. The **premise contradicts the source** — b12
+states permits *are* reissued each September. The model declined for a reason
+that is false.
+
+> `correct_abstention_rate` counts outcomes, not reasoning. It cannot
+> distinguish a genuine abstention from an abstention reached by misreading the
+> context. A system that misreads its way to the right answer scores identically
+> to one that reads correctly.
+
+Not fixing the metric now — measuring reasoning is a much larger instrument than
+measuring outcomes, and building it here would be scope creep on a number that
+is already the second most informative in the suite.
+
+What it **does** change is weighting. The original audit's risk register treated
+grounding as adequately mitigated by system-prompt rule 3. Three measurements
+now say otherwise:
+
+    F31   generator asserts unsupported claims and cites them   0/4 caught
+    F32   generator emits citations with no content             2/4 near-misses
+    here  generator reasons from a premise the context denies   1 observed
+
+> **Groundedness checking is a heavier item than the original audit assumed**,
+> and finding #5 (citations unverified) should be read as the parent of all
+> three rather than as a separate P2.
