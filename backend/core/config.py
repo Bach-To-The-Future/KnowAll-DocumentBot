@@ -121,12 +121,21 @@ class Settings(BaseSettings):
     rerank_top_n: int = 5            # chunks kept after reranking
     # Finding #27 / P-2 candidate C3 separated two jobs one number was doing.
     #
-    # ABSTENTION — "did retrieval return anything coherent?" A cross-encoder
-    # sigmoid below 0.01 is a logit below about -4.6: the model is CONFIDENTLY
-    # rejecting even its own best candidate. That is the principled reading of
-    # "nothing coherent came back", tied to the model's own confidence
-    # semantics rather than fitted to a corpus. It is NOT a relevance judgement
-    # and must not be tuned as one.
+    # ABSTENTION — "did retrieval return anything coherent?"
+    #
+    # JUSTIFICATION (primary, and the only one that survives a corpus change):
+    # a cross-encoder sigmoid below 0.01 is a logit below about -4.6. The model
+    # is CONFIDENTLY rejecting even its own best candidate. That is the
+    # principled reading of "nothing coherent came back", tied to the model's
+    # own confidence semantics rather than to any corpus.
+    #
+    # CORROBORATION ONLY: 0.01 also sits near the 1st percentile of the
+    # reranker's observed rank-1 output on tier B (range 0.0003-0.9999). That
+    # is a sanity check on the logit reasoning, NOT its basis — a bar justified
+    # by a percentile moves when the corpus composition moves, and this one
+    # must not.
+    #
+    # It is NOT a relevance judgement and must not be tuned as one.
     abstention_score_floor: float = 0.01
 
     # RELEVANCE — an optional per-chunk cut, now OFF by default. At 0.25 this
