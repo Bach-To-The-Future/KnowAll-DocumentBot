@@ -2278,3 +2278,88 @@ belong in the manifest at generation time. The heuristic stays only where
 ground truth is unavailable (tier A, tier C, the production collection), and
 every reported figure must say **which source it came from**.
 
+## [P-3 / D3] Viability test — FAILED, and the control says why
+Status: DONE · D3 and D4 are both dead as designed · D5 landed (`7e26d56`)
+
+### The test design was wrong first, and the maintainer caught it
+
+My first design replayed only the four near-misses and the inversion — every
+case a rejection. **A model that answers "no" to everything scores 5/5.** That
+is the same trap as `correct_abstention_rate = 1.000` while abstaining on 68%
+of answerable questions, which I had caught myself and then reproduced.
+
+Corrected as directed: both directions, claim presented as a standalone
+proposition rather than self-review, EN and FR reported separately, confusion
+matrix rather than an accuracy figure.
+
+### Result: 0 acceptances out of 16
+
+    [all] n=16              accepted   rejected
+      should accept              0         11    <- good answers killed
+      should reject              0          5
+
+    [en] n=12   0 accepted / 8 positives
+    [fr] n=4    0 accepted / 3 positives
+
+It rejected **"Disposal requires written authorisation from the records
+officer"** against a passage containing that sentence **verbatim**.
+
+Read naively this is "D3 is a refusal machine" — exactly the outcome the
+maintainer predicted the negatives-only design would have hidden.
+
+### The control: it is not judging at all
+
+Before declaring D3 dead I checked whether this was a prompt artifact rather
+than an inability, because **D4 shares the framing** and the distinction
+changes what D4 is worth.
+
+    CONTROL 1  claim IS the passage, word for word
+               "The sky is blue." / "The sky is blue."      -> NO
+               real passage, identical claim                -> NO
+               verbatim sentence from the passage           -> NO
+
+    CONTROL 2  label mapping FLIPPED (YES now means "contradicts")
+               supported claim   (expect NO)                -> NO
+               contradicted claim (expect YES)              -> NO
+
+    CONTROL 3  no YES/NO framing, open question
+               "How long are records retained?"
+               -> "Records are retained for seven years from the date of creation."
+
+> **"NO" is a fixed token, not a decision.** Control 2 settles it: with the
+> labels inverted the model should have said YES at least once, and did not.
+> Control 3 settles the other half: the model reads the passage perfectly and
+> answers correctly when not forced into a binary verdict.
+
+### What this actually means
+
+The failure is **specific to the constrained binary-verdict framing**, not to
+comprehension. Consequences:
+
+- **D3 is dead as designed.** Not because the model cannot verify, but because
+  it cannot be steered into emitting a verdict token.
+- **D4 is dead for the same reason**, without needing its own test. It asks for
+  the same kind of binary judgement ("does this passage contain the answer?").
+  That settles the D3/D4 asymmetry the maintainer raised — it is moot.
+- **D1's value goes UP.** Control 3 shows the model performs well in exactly
+  the mode D1 needs: open-ended extraction from a passage.
+
+### New candidate D6, derived from the control rather than assumed
+
+Elicit the supporting sentence **open-ended** — the mode that demonstrably
+works — then verify it mechanically, which needs no model judgement at all:
+
+    1. the generator emits, per claim, a QUOTE from the cited passage
+       (open-ended extraction — Control 3's mode)
+    2. the quote is checked to occur in that passage, byte-for-byte
+       (pure string matching, no model in the loop)
+    3. no quote, or a quote that does not occur -> the claim is unsupported
+
+This is D1's mechanism with D3's intent, avoiding the failure both D3 and D4
+run into. It is **not** a complete answer to the benchmark inversion — the
+model can still quote the deadline truthfully and draw the wrong conclusion —
+so D2 remains the only candidate that attacks that case head-on.
+
+**Not implementing D6.** P-3's discipline was to propose and let the maintainer
+decide, and D6 arrived after approval. Recorded for decision alongside D2.
+
