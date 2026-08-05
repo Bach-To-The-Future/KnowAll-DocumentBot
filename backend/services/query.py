@@ -20,6 +20,7 @@ from core.exceptions import InvalidRequestError
 from core.interfaces import CacheStore, DenseEmbedder, LLMClient
 from core.telemetry import Telemetry, log_event, new_trace_id, timed
 from models.schemas import QueryRequest, RetrievedChunk
+from services import grounding
 from services.memory import SessionMemory
 from services.retrieval import RetrievalService
 
@@ -31,12 +32,26 @@ CORPUS_VERSION_KEY = "corpus:version"
 
 # Instructions live in the system message; only context + question go in the
 # user turn, so instruction-following survives long contexts.
-SYSTEM_PROMPT = f"""You are a document question-answering assistant.
+_BASE_RULES = f"""You are a document question-answering assistant.
 Rules:
 1. Answer using ONLY the numbered context passages provided by the user.
 2. Cite the passage number(s) in square brackets, e.g. [1] or [1][3], for every factual claim.
 3. If the context does not contain the information needed to answer, reply exactly: "{NO_ANSWER_MESSAGE}" Do not guess and do not use outside knowledge.
 4. Be concise and factual."""
+
+# P-3 candidates D1+D6. The ONLY sanctioned change to the generation prompt
+# (R5 approval was scoped to exactly this and nothing else in the prompt moves).
+#
+# Phrased as open-ended copying, not as a judgement, because D3's control
+# showed this model emits a fixed "NO" under any binary-verdict framing but
+# reads and extracts correctly when simply asked.
+_SUPPORT_RULE = """
+5. After your answer, write a line containing only SUPPORT: and then, for each
+passage you cited, one line of the form [n] followed by a sentence copied
+word-for-word from passage n. Copy exactly; do not paraphrase."""
+
+SYSTEM_PROMPT = _BASE_RULES
+SYSTEM_PROMPT_WITH_SUPPORT = _BASE_RULES + _SUPPORT_RULE
 
 REWRITE_SYSTEM_PROMPT = (
     "You rewrite follow-up questions into standalone questions. Given a "
@@ -358,6 +373,40 @@ class QueryService:
         )
         log_event("rag_query", answer_chars=len(answer), **prepared.trace)
 
+    @property
+    def _system_prompt(self) -> str:
+        return (SYSTEM_PROMPT_WITH_SUPPORT if self._settings.require_support_quotes
+                else SYSTEM_PROMPT)
+
+    def _check_grounding(self, answer: str, prepared: PreparedQuery) -> str:
+        """P-3 D1+D6. Strip the SUPPORT block and verify every cited passage
+        carries a quote that actually occurs in it.
+
+        Reversible: require_support_quotes=false skips this entirely and
+        reproduces the pre-2.4 behaviour, which a test pins.
+        """
+        if not self._settings.require_support_quotes or not answer:
+            return answer
+        if answer == NO_ANSWER_MESSAGE:
+            return answer
+
+        result = grounding.check(answer, prepared.citations)
+        prepared.trace["grounding_reason"] = result.reason
+        prepared.trace["grounding_emitted_quotes"] = result.emitted_quotes
+        prepared.trace["grounding_cited"] = result.cited
+        if result.supported:
+            return result.body
+
+        prepared.trace["grounding_rejected"] = True
+        prepared.trace["grounding_unverified"] = result.unverified
+        prepared.trace["grounding_raw"] = answer
+        logger.warning(
+            f"Answer REJECTED as ungrounded (#5/D6): reason={result.reason} "
+            f"cited={result.cited} unverified={result.unverified} "
+            f"raw={answer[:160]!r}"
+        )
+        return NO_ANSWER_MESSAGE
+
     def _reject_if_malformed(self, answer: str, prepared: PreparedQuery) -> str:
         """Finding #32 (P-3 candidate D5). A generation carrying no substantive
         content is a FAILED generation, not an answer and not an abstention.
@@ -409,10 +458,11 @@ class QueryService:
 
         with timed(prepared.trace["timings"], "generation_ms"):
             answer = (await self._llm.acomplete(
-                prompt=prepared.prompt, system_prompt=SYSTEM_PROMPT
+                prompt=prepared.prompt, system_prompt=self._system_prompt
             )).strip()
 
         answer = self._reject_if_malformed(answer, prepared)
+        answer = self._check_grounding(answer, prepared)
         if prepared.cache_key and answer:
             self._cache_set(prepared.cache_key, answer, prepared.citations)
         await run_in_threadpool(self._finish, prepared, answer)
@@ -452,7 +502,7 @@ class QueryService:
                 try:
                     with timed(prepared.trace["timings"], "generation_ms"):
                         async for token in self._llm.astream(prompt=prepared.prompt,
-                                                             system_prompt=SYSTEM_PROMPT):
+                                                             system_prompt=self._system_prompt):
                             answer_parts.append(token)
                             yield json.dumps({"type": "token", "text": token}) + "\n"
                 except Exception as e:
@@ -466,7 +516,8 @@ class QueryService:
                 # the guard cannot un-send them. It emits a correction event so
                 # the client replaces an empty bubble with the abstention, and
                 # keeps the malformed text out of the cache and out of memory.
-                checked = self._reject_if_malformed(answer, prepared)
+                checked = self._check_grounding(
+                    self._reject_if_malformed(answer, prepared), prepared)
                 if checked != answer:
                     answer_parts[:] = [checked]
                     answer = checked

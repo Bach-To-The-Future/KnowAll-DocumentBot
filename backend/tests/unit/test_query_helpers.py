@@ -226,3 +226,50 @@ def test_the_guard_is_reversible_at_zero():
     prepared = PreparedQuery([], "", {}, None)
     assert service._reject_if_malformed("[1] [1][3]", prepared) == "[1] [1][3]"
     assert "malformed_generation" not in prepared.trace
+
+
+# --- P-3 D1+D6 wiring into QueryService ---------------------------------------
+
+def test_the_support_rule_is_the_only_prompt_change():
+    """R5 approval was scoped to exactly this. Nothing else in the generation
+    prompt may move."""
+    from services.query import SYSTEM_PROMPT, SYSTEM_PROMPT_WITH_SUPPORT
+    assert SYSTEM_PROMPT_WITH_SUPPORT.startswith(SYSTEM_PROMPT)
+    added = SYSTEM_PROMPT_WITH_SUPPORT[len(SYSTEM_PROMPT):]
+    assert added.strip().startswith("5.")
+    assert "SUPPORT:" in added and "word-for-word" in added
+
+
+def test_grounding_is_reversible():
+    """require_support_quotes=false drops the rule AND the check."""
+    from services.query import SYSTEM_PROMPT, PreparedQuery
+    service = make_service(FakeLLM(), require_support_quotes=False)
+    assert service._system_prompt == SYSTEM_PROMPT
+    ungrounded = 'Invented [1].\nSUPPORT:\n[1] "not in the passage"'
+    prepared = PreparedQuery([{"index": 1, "text": "real text"}], "", {}, None)
+    assert service._check_grounding(ungrounded, prepared) == ungrounded
+    assert "grounding_rejected" not in prepared.trace
+
+
+def test_ungrounded_answer_becomes_the_abstention_and_is_recorded():
+    from services.query import NO_ANSWER_MESSAGE, PreparedQuery
+    service = make_service(FakeLLM())
+    prepared = PreparedQuery([{"index": 1, "text": "real text"}], "", {}, None)
+    out = service._check_grounding(
+        'Invented [1].\nSUPPORT:\n[1] "not in the passage"', prepared)
+    assert out == NO_ANSWER_MESSAGE
+    assert prepared.trace["grounding_rejected"] is True
+    assert prepared.trace["grounding_reason"] == "quote-not-found"
+    # Emission is recorded separately from matching: this generator DID quote.
+    assert prepared.trace["grounding_emitted_quotes"] is True
+
+
+def test_a_grounded_answer_is_returned_with_the_support_block_stripped():
+    from services.query import PreparedQuery
+    service = make_service(FakeLLM())
+    prepared = PreparedQuery([{"index": 1, "text": "Records are kept."}], "", {}, None)
+    out = service._check_grounding(
+        'Kept [1].\nSUPPORT:\n[1] "Records are kept."', prepared)
+    assert out == "Kept [1]."
+    assert "SUPPORT" not in out
+    assert "grounding_rejected" not in prepared.trace

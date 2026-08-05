@@ -86,6 +86,25 @@ class Settings(BaseSettings):
     # collection would be indistinguishable from a verified one forever.
     digest_enforcement_from: str | None = None
 
+    # Finding #5 / P-3 candidates D1+D6 — quote-backed grounding.
+    #
+    # The generator must copy a supporting sentence out of each passage it
+    # cites; the quote is then checked to occur in that passage by string
+    # comparison, with no model judgement anywhere in the check.
+    #
+    # Elicited as open-ended COPYING rather than a yes/no judgement because
+    # D3's control showed this model emits a fixed "NO" under any binary
+    # verdict framing, while reading and extracting correctly when asked plainly.
+    #
+    # DOCUMENTED GAP: catches claims with no textual basis in the cited
+    # passage. Does NOT catch a claim that quotes truthfully and reasons
+    # wrongly from it — the benchmark deadline-into-entitlement inversion
+    # survives this. Candidate D2 (entailment) remains OPEN, not closed.
+    #
+    # REVERSIBLE: false skips the check and drops the prompt rule, reproducing
+    # pre-2.4 behaviour exactly.
+    require_support_quotes: bool = True
+
     # Finding #32 / P-3 candidate D5 — malformed-generation guard.
     #
     # Minimum SUBSTANTIVE characters (citation markers stripped) for a
