@@ -69,6 +69,7 @@ Verdict key: **CONFIRMED** · **ALREADY FIXED** · **INCORRECT — actual state 
 | **28** | **P1** | Query-rewrite fallback catches exceptions, empty output and length overruns but NOT semantic drift. A records-retention follow-up rewritten as a hazardous-waste question is fluent, correctly sized, and passes every guard | full-mode run 2026-08-04; 3-5 distinct rewrites per input over 10 calls | **FIXED** (`b6a6f00`) — embedding-similarity guard + per-entry instrumentation |
 | **29** | P2 | csv, xlsx and pptx chunks carry no `section_title` at all, so section expansion degraded to a ±1 window and the reranker saw bare row-groups | 13/22 rank-1 chunks on tier B had no section metadata | **FIXED** (`64b9a35`) |
 | **30** | P2 | `_expand_context()` runs AFTER the score floor, so enrichment can never influence the discard decision | `retrieval.py:182` floor vs `:188` expand | **PINNED, not fixed** (`414de43`) — the fix IS P-2 candidate C1 |
+| **31** | **P1** | A cross-encoder scores TOPICAL RELEVANCE, not ANSWER PRESENCE. Near-miss unanswerable queries score 0.70-0.997 — higher than most correct answers — so no absolute score bar can separate "about your question" from "answers your question" | C3 run: 4 near-miss unanswerable entries at 0.6986 / 0.9557 / 0.9568 / 0.9968 | **OPEN** — exposed by C3, not caused by it |
 
 ## 0.3 Finding 15 — correction
 
@@ -1599,3 +1600,109 @@ thing C3 is most likely to break. Seven added, two kinds, both languages:
   confidently wrong answer, not a near miss.
 
     total 32   answerable 22   unanswerable 10   (7 en / 3 fr)
+
+
+## [P-2 C3] Result — falsification condition FIRED, and the split is diagnostic
+Status: measured, provenance-complete except `web_image_digest` (frontend not
+rebuilt; retrieval mode never touches it)
+
+    retrieval mode, k=5, 3 runs, 32 golden entries (22 answerable / 10 unanswerable)
+
+                              before C3      after C3
+    recall_at_fetch             1.000          1.000
+    hit_at_k                    0.318          0.682
+    mrr_at_k                    0.318          0.682
+    false_abstention_rate       0.682          0.318
+    correct_abstention_rate     1.000          0.200   <-- FALSIFICATION FIRED
+    spread across 3 runs         0.0            0.0
+
+### 1. Abstention first, because it is the falsification condition
+
+`correct_abstention_rate` collapsed **1.000 → 0.200**. Eight of ten unanswerable
+queries now return chunks. Split by the two kinds authored for exactly this
+purpose, the causes are **different**, and only one of them is a threshold
+problem:
+
+**Absent-specific — the bar is too low. Fixable, and gated on tier A.**
+
+    0.0664  How many parking permits were issued last September?
+    0.0383  What revenue did the West region record in Q1 of the following year?
+    0.0380  Combien de jours de preavis faut-il pour resilier le contrat CT-9002 ?
+    0.0152  What is the annual budget for the advanced training modules?
+
+All four sit between 0.015 and 0.066 — above the 0.01 bar, but only just. A bar
+around 0.07–0.10 catches all four. **Not doing that:** a value chosen to
+separate these specific scores is a corpus-fitted relevance threshold, which is
+exactly what Phase 1A defers until tier A exists.
+
+**Near-miss — NO absolute bar can fix these.**
+
+    0.9968  Quel montant est accorde aux demandes soumises apres le 31 mars ?
+    0.9568  What penalty applies when uptime falls below 95 percent?
+    0.9557  What happens to an incident that is still unresolved after the
+            duty supervisor has been notified?
+    0.6986  Who can authorise an exception to the seven-year retention period?
+
+These score **0.70 to 0.997** — higher than most *correct* answers in the same
+run. The cross-encoder is confidently right: the chunk it returned **is** topically
+relevant. It simply does not contain the answer.
+
+> A cross-encoder scores **topical relevance**, not **answer presence**. No
+> threshold on that score can separate "this passage is about your question"
+> from "this passage answers your question", because the model is not measuring
+> the second thing. Raising the bar high enough to reject a 0.9968 near miss
+> would reject nearly every correct answer too.
+
+Logged as **finding #31 (P1)**. It is not a C3 regression — the old floor
+"passed" these only because it was rejecting almost everything, including 15 of
+22 correct answers. C3 exposed it; it did not cause it.
+
+**Correctly abstained (2/10):** *"Quel taux de change s'applique aux
+subventions versees a l'etranger ?"* (no exchange-rate content anywhere) and
+*"How long is the maintenance window for the payroll system?"* — the only two
+where even the best candidate fell below 0.01.
+
+### 2. The instrument: alive, and the reason it still reads equal has changed
+
+    answerable returned:    5 chunks x 15 entries,  0 chunks x 7
+    unanswerable returned:  5 chunks x 8,           0 chunks x 2
+    reciprocal rank of every hit: 1.0  (15 of 15)
+
+`mrr_at_k == hit_at_k` still, at 0.682 — but for a completely different reason,
+and the difference matters:
+
+    BEFORE  forced by construction. Results never exceeded ONE item, so there
+            was no rank to reciprocate. The metric could not diverge.
+    AFTER   an observation. Results are five items, mrr CAN diverge, and it
+            does not because the reranker places the correct chunk at rank 1
+            in every single case where it retrieves it at all — 15 of 15.
+
+That is the instrument coming alive. It can now register a ranking regression,
+which it was structurally incapable of before. `mrr_at_k` is the number to carry
+into Phase 3 as the retrieval-quality baseline.
+
+### 3. Do NOT read the hit@k jump as a 2.1x improvement
+
+0.318 → 0.682 is **substantially mechanical**. The corpus is 18 chunks; `k=5`
+returns 28% of it on every non-abstaining query. Zero entries returned five
+chunks and missed the answer, which sounds impressive and mostly reflects how
+small the haystack is.
+
+What is *not* mechanical, and is the real result: the correct chunk was there at
+rank 1 in every case, and the old floor was throwing it away.
+
+### 4. The remaining false abstentions are mostly by construction
+
+Seven answerable entries still return nothing. **Six are conversational** —
+*"And the disposal rule?"*, *"Et le stock de securite ?"* — which retrieval mode
+sends to the retriever **verbatim**, because it does not rewrite. They are
+authored to require history-based rewriting, so failing here is the mode
+behaving correctly, not a defect. Full mode is where they should be read.
+
+The seventh, *"At what stock level should a replenishment order be raised?"*
+(xlsx `reorder_point,25`), is a genuine table-answer failure with the correct
+chunk scoring below 0.01.
+
+`false_abstention_rate = 0.318` in **retrieval mode therefore over-counts**, and
+should be read alongside the conversational slice (`hit@k = 0.333`) rather than
+alone.
