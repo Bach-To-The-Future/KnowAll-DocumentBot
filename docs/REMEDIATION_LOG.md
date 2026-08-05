@@ -2052,3 +2052,229 @@ be good enough at 1900, and in that case the honest method is empirical: embed
 a full chunk and a truncated prefix and compare, which is how #19 was proven
 originally.
 
+
+## PROPOSAL P-3 — finding #5 (groundedness). Candidates, not a decision.
+Status: PROPOSAL-PENDING · scope: phase 2.4
+
+### What finding #5 has become
+
+Filed as "citations unverified", P2. It is now the **parent of three measured
+defects**, and the original severity was wrong:
+
+| child | what was measured |
+|---|---|
+| **F31** (P1) | generator asserts unsupported claims and cites them — **0 of 4** near-misses caught |
+| **F32** (P2) | generator emits citation markers with no prose — 2 of 4 near-misses |
+| *(unnamed)* | generator reaches a correct abstention through a premise the context **contradicts** |
+
+The constraint that shapes every candidate: **groundedness checking on a 1B
+model, without upgrading the model.** Appendix B forbids the upgrade as a
+substitute for fixing grounding, and F31 measured that the second abstention
+layer does not function at this size.
+
+### The benchmark case — and why the obvious fix fails it
+
+Every candidate must be scored against this, measured on 2026-08-05:
+
+    question   "Quel montant est accorde aux demandes soumises apres le 31 mars ?"
+    context    "Les demandes doivent etre soumises avant le 31 mars."  (+ ceiling 75000)
+    answer     "le montant des demandes soumises apres le 31 mars est de 75000 dollars"
+
+The model **inverted a deadline into an entitlement**. Now note what this
+defeats:
+
+- **Range / numeric validation passes.** 75000 is genuinely in the context.
+- **Citation-index validation passes.** Passage [5] exists and is the one about
+  the grant.
+- **Verbatim-quote validation passes.** The model can quote the deadline
+  sentence truthfully and still draw the opposite conclusion from it.
+- **Length and non-emptiness pass**, as they did for F28 and F32.
+
+> Every check that validates the *shape* of the answer or the *presence* of its
+> tokens passes this case. Only a check that compares the **claim** against the
+> **passage's meaning** catches it. That is the design problem.
+
+---
+
+### D1 — Extractive span check
+
+Require each claim to carry a verbatim span from its cited passage; verify the
+span occurs in that passage byte-for-byte.
+
+*Attacks:* F32 (no span → malformed), fabricated citations, invented numbers.
+*Falsified if:* it does not catch the benchmark case — **and it does not**. The
+model can quote the deadline sentence exactly and still invert it.
+*Cost:* code only. Prompt change to require spans ⇒ R5 (generation prompt).
+*Reversible:* yes, a settings flag.
+*Honest verdict:* necessary, nowhere near sufficient. Catches F32 and crude
+fabrication; misses the class that matters most.
+
+### D2 — NLI entailment check
+
+A small entailment model scores (passage, claim) → entails / neutral /
+contradicts. Reject or abstain below a threshold.
+
+*Attacks:* the benchmark case directly. "Applications after 31 March receive
+75000" is **not entailed** by "applications must be submitted before 31 March",
+and an NLI model is trained on exactly that distinction.
+*Falsified if:* a model small enough to run alongside a 1B generator cannot
+make the call reliably on French, or on passages this long. Both are real risks
+and both are measurable before committing.
+*Cost:* **a new runtime model** ⇒ R5 stop-and-propose in its own right. Memory
+alongside the existing embedder + reranker + generator on a 3GiB api container
+is a live constraint, not a footnote.
+*Reversible:* yes — off by default, one flag.
+*Honest verdict:* the only candidate that attacks the benchmark case head-on,
+and the most expensive.
+
+### D3 — Verification pass by the same 1B model
+
+Per claim, a second call: *"Is this claim stated in this passage? yes/no."*
+
+*Attacks:* the benchmark case, in principle. Verification is a strictly easier
+task than generation, and the model is not being asked to compose.
+*Falsified if:* the 1B model is no better at verifying than generating — which
+F31 gives real reason to suspect, since it already fails to apply rule 3. **This
+is cheap to test before building anything**: replay the four near-misses and the
+inversion as verification prompts and count.
+*Cost:* code only, no new dependency. One extra LLM call per claim — meaningful
+latency on CPU.
+*Reversible:* trivially.
+*Honest verdict:* test it before designing around it. If it works it is by far
+the best cost/benefit; if it does not, it fails fast and cheap.
+
+### D4 — Answer-presence gate before generation
+
+Decide *answerability* separately from generation: for the top passages, ask
+whether they contain the information the question needs, and abstain if not.
+
+*Attacks:* **F31 at its root.** F31 is not really a generation defect — it is
+that nothing in the system ever decides answerability. The cross-encoder cannot
+(it scores topical relevance), and the generator will not.
+*Falsified if:* it inherits D3's weakness — same model, same size. Or if it
+raises `false_abstention_rate` more than it raises `correct_abstention_rate`,
+which the split metric now measures directly.
+*Cost:* one LLM call per query, before generation. Cheaper than D3 (per query,
+not per claim).
+*Reversible:* yes.
+*Honest verdict:* attacks the right layer. Shares D3's dependence on 1B
+judgement, so **D3's cheap test settles both**.
+
+### D5 — Malformed-generation guard  *(F32 only — separable)*
+
+Non-citation content below a trivial length ⇒ failed generation ⇒
+`NO_ANSWER_MESSAGE`.
+
+*Attacks:* F32 exactly. Nothing else.
+*Falsified if:* it fires on legitimate terse answers. Measurable against the
+golden set.
+*Cost:* trivial. No prompt change, no new dependency, no extra call.
+*Reversible:* yes.
+*Honest verdict:* **not a groundedness fix and should not wait for one.** It is
+a correctness bug with a five-line fix. Recommend landing it independently of
+this proposal.
+
+---
+
+### Recommended sequence, not a decision
+
+1. **Run D3's cheap test first.** Replay the four F31 near-misses and the
+   benchmark inversion as *verification* prompts to the same 1B model, and
+   count. It costs one script and settles whether D3 and D4 are viable at all
+   before either is designed.
+2. **Land D5 now**, independently. It is a separable correctness bug.
+3. **D1 as the floor** — necessary regardless, and it makes D2/D3 cheaper by
+   giving them a claim/span pair to check rather than free text.
+4. **D2 only if D3's test fails**, because it is the only remaining candidate
+   that attacks the benchmark case, and it carries a new-runtime-model
+   decision under R5.
+
+### Reversibility — a standing requirement
+
+Whatever lands must be switchable off, the way C3 left `rerank_score_floor`
+restorable at `0.0` with a test pinning the old behaviour.
+
+> A groundedness check that cannot be switched off is a groundedness check
+> nobody can measure the cost of.
+
+Concretely: a settings flag per mechanism, defaulting **on**, with a test that
+disabling it reproduces the pre-2.4 behaviour exactly — and both states in the
+provenance tuple, so a baseline recorded either side is flagged as semantic
+drift rather than silently diffed.
+
+### How it gets measured
+
+The instrument already exists and C3 made it sensitive:
+
+    correct_abstention_rate   must RISE  (F31: 8 of 10 unanswerable leak today)
+    false_abstention_rate     must NOT rise materially — the trade this
+                              proposal is most likely to lose
+    hit_at_k / mrr_at_k       must not regress
+
+Plus a new counted outcome per entry, following the F28 pattern:
+`n_rejected_as_ungrounded`, with the rejected text kept for forensics — so a
+guard that is silently rejecting everything is visible as a count rather than
+inferred from a metric moving.
+
+**Caveat carried from the metric-limitation note:** `correct_abstention_rate`
+counts outcomes, not reasoning. It cannot tell a genuine abstention from an
+abstention-by-misreading, so it can register success for the wrong reason. The
+per-entry forensic record is what makes that inspectable.
+
+
+## Gating corrected — ordering headroom is NOT tier-A-gated
+Directed by the maintainer, correcting an over-gate I recorded as directed
+without questioning.
+
+I wrote that C2, C4 and C1+#30 were tier-A-only because reciprocal rank was
+1.0 in 15/15 on tier B. The maintainer's correction: that conflated two
+different requirements.
+
+| genuinely tier-A-gated | NOT tier-A-gated |
+|---|---|
+| absolute threshold VALUES (the absent-specific abstention bar, C4's normalised cut) | **ordering headroom** |
+| headline baseline credibility | |
+| real FR / OCR / table coverage | |
+
+Ordering experiments need candidate pools where chunks **compete for rank 1** —
+that is corpus **scale and topical redundancy**, not human authorship. I gated
+on tier A because the probe happened to demonstrate divergence there, which was
+the wrong feature to generalise from.
+
+### Tier C — the repository's own documentation
+
+`docs/`, the audit report, this log, the runbooks. Real human prose, deep
+headings, genuine near-duplicate content across sessions, clean licensing,
+already on disk. Manifested and checksummed exactly like tier B, reported
+**separately from both A and B**.
+
+It does **not** replace tier A: English-only, technical register, no PDF, no
+OCR, no tables.
+
+**Gating pre-test, before any questions are authored:** measure whether
+`mrr_at_k` diverges from `hit_at_k` on tier C. If it does not, tier C does not
+unblock the ordering experiments either, and that must be known before
+investing in questions.
+
+Tier-C questions must target specifics **only a reader of these documents could
+know** — finding numbers, commit SHAs, measured values — so that a full-mode
+answer cannot come from the model's generic RAG knowledge instead of from
+context.
+
+### 3.1 refiled: UNBLOCKED, not indefinite
+
+Index tuning needs **many** vectors, not realistic ones. A deliberately
+synthetic scale corpus, generated to a target count and never committed, is
+sufficient: at 100k+ vectors `m` / `ef_construct` / `ef` become measurable,
+where at 372 they were below `full_scan_threshold` and unmeasurable by
+construction. Separate workstream, no longer deferred.
+
+### Shape classifier — retire it for tier B, do not rebuild it
+
+The heuristic (≥3 lines, <8 words/line) conflates bulleted prose with tables,
+which is why the "list" bucket spanned 0.0136–0.9998 and could not be quoted.
+`generate_tier_b.py` **knows what shape it emitted** — ground-truth shape labels
+belong in the manifest at generation time. The heuristic stays only where
+ground truth is unavailable (tier A, tier C, the production collection), and
+every reported figure must say **which source it came from**.
+
