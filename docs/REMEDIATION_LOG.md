@@ -69,7 +69,7 @@ Verdict key: **CONFIRMED** · **ALREADY FIXED** · **INCORRECT — actual state 
 | **28** | **P1** | Query-rewrite fallback catches exceptions, empty output and length overruns but NOT semantic drift. A records-retention follow-up rewritten as a hazardous-waste question is fluent, correctly sized, and passes every guard | full-mode run 2026-08-04; 3-5 distinct rewrites per input over 10 calls | **FIXED** (`b6a6f00`) — embedding-similarity guard + per-entry instrumentation |
 | **29** | P2 | csv, xlsx and pptx chunks carry no `section_title` at all, so section expansion degraded to a ±1 window and the reranker saw bare row-groups | 13/22 rank-1 chunks on tier B had no section metadata | **FIXED** (`64b9a35`) |
 | **30** | P2 | `_expand_context()` runs AFTER the score floor, so enrichment can never influence the discard decision | `retrieval.py:182` floor vs `:188` expand | **PINNED, not fixed** (`414de43`) — the fix IS P-2 candidate C1 |
-| **31** | **P1** | A cross-encoder scores TOPICAL RELEVANCE, not ANSWER PRESENCE. Near-miss unanswerable queries score 0.70-0.997 — higher than most correct answers — so no absolute score bar can separate "about your question" from "answers your question" | C3 run: 4 near-miss unanswerable entries at 0.6986 / 0.9557 / 0.9568 / 0.9968 | **OPEN** — exposed by C3, not caused by it |
+| **31** | **P1** | A cross-encoder scores TOPICAL RELEVANCE, not ANSWER PRESENCE. Near-miss unanswerable queries score 0.70-0.997 — higher than most correct answers — so no absolute score bar can separate "about your question" from "answers your question". The GENERATOR does not catch them either: 0 of 4, two fabrications with citations and two degenerate outputs | C3 run scores 0.6986 / 0.9557 / 0.9568 / 0.9968; full-mode generator test declined on 2/10, both being entries where retrieval returned nothing | **OPEN, P1 confirmed** — converges with #5 |
 
 ## 0.3 Finding 15 — correction
 
@@ -1706,3 +1706,110 @@ chunk scoring below 0.01.
 `false_abstention_rate = 0.318` in **retrieval mode therefore over-counts**, and
 should be read alongside the conversational slice (`hit@k = 0.333`) rather than
 alone.
+
+
+## [F31 caveat] The generator does NOT catch the near-misses — 0 of 4
+Status: measured · F31 stays **P1**, and converges with finding #5 as predicted
+
+The maintainer's caveat was right to demand the measurement: the system has two
+abstention layers, and determining answer presence is a job the generator can do
+and a cross-encoder structurally cannot. Measured in full mode
+(`ENABLE_ANSWER_CACHE=false`, `llama3.2:1b`), every unanswerable entry run
+through `prepare()` + `answer_prepared()`. Reported individually as directed.
+
+### The four near-misses, verbatim
+
+**1. "Who can authorise an exception to the seven-year retention period?"**
+
+> *"According to [1], the records officer has written authority to dispose of
+> records. Therefore, the records officer is the one who can authorise an
+> exception to the seven-year retention period."*
+
+**FABRICATION.** b01 says disposal requires the records officer's written
+authorisation. It says nothing about exceptions to the retention period. The
+model made an unsupported inferential leap — signposted by its own
+"Therefore" — and attached a citation to it.
+
+**2. "What happens to an incident that is still unresolved after the duty
+supervisor has been notified?"**
+
+> `[1] [1][3]`
+
+**DEGENERATE.** Citation markers, no prose. Not a decline and not an answer.
+
+**3. "Quel montant est accorde aux demandes soumises apres le 31 mars ?"**
+
+> *"Selon les informations fournies [5], le montant des demandes soumises après
+> le 31 mars est de 75000 dollars."*
+
+**FABRICATION, and the worst of the four.** b13 states the deadline *is* 31
+March and the ceiling is 75 000. The model inverted a deadline into an
+entitlement: it asserts that applications submitted **after** the deadline
+receive the money. Fluent, cited, and the opposite of what the source says.
+
+**4. "What penalty applies when uptime falls below 95 percent?"**
+
+> `[1] [2][3]`
+
+**DEGENERATE**, as #2.
+
+    generator declined on the near-misses:  0 of 4
+
+### And the absent-specific half
+
+Declined on 2 of 6 — and both are the two where **retrieval itself abstained**,
+so the generator never saw any context. On every entry where chunks were
+returned, it produced something.
+
+One of those, *"How many parking permits were issued last September?"*, is worth
+recording because it is the near-miss failure in miniature:
+
+> *"According to the provided documents, in September 2023, there are no parking
+> permit reissues mentioned. Therefore, I could not find this information..."*
+
+It reaches the right conclusion through a **false premise**: b12 states permits
+*are* reissued each September. The decline is correct; the reasoning contradicts
+the cited source.
+
+### Conclusion
+
+    generator declined on 2 of 10 unanswerable entries
+    ...and both were entries where retrieval returned NOTHING
+
+> **With `llama3.2:1b`, the second abstention layer does not function.** System
+> prompt rule 3 is followed essentially never when context is present. The
+> layering argument is sound in principle; this model does not implement it.
+
+F31 therefore **stays P1** and is not merely a layering observation. It converges
+with **finding #5 (citations unverified)** exactly as anticipated — same root
+cause, now with four measured instances: the model asserts what the context does
+not support and cites a passage that does not support it.
+
+Scoped honestly: this is measured on `llama3.2:1b` only. A larger generator may
+comply with rule 3. But 1b is what the system ships with, and **upgrading the
+model is explicitly forbidden as a substitute for fixing grounding** (Appendix
+B), so the finding stands against the shipped configuration.
+
+Two follow-on observations, recorded not acted on:
+
+- **Degenerate citation-only output** (2 of 4 near-misses returned `[1] [2][3]`
+  and nothing else) is a distinct generation defect from fabrication. It is not
+  an abstention and would reach a user as an empty answer.
+- The correct fix direction is **verification against the cited passage**, which
+  is finding #5's territory, not a threshold anywhere.
+
+
+## Phase 3 planning note — the reranker has no ordering headroom on tier B
+Status: recorded, as directed
+
+Reciprocal rank was **1.0 in 15 of 15** hits. The reranker places the correct
+chunk first in every case where it retrieves it at all. There is no ordering to
+improve on this corpus, which means:
+
+> **P-2 candidates C2 and C4, and the C1 + finding #30 joint experiment, are all
+> TIER-A-ONLY.** Measuring any of them against tier B would compare against a
+> ceiling already reached — a null result would be indistinguishable from a
+> broken implementation.
+
+Phase 3 must not schedule them before tier A exists. C1/#30 additionally carry
+the reindex plus longer-reranking cost, which must be stated together.
