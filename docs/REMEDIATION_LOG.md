@@ -1488,3 +1488,114 @@ comparison, recorded here.
 provenance: <fields>` at record time whenever any provenance field is `unknown`
 or `unpinned`, naming them, and pointing at `baselines/README.md`. Previously
 that judgement lived only in a README nobody reads while running an eval.
+
+
+# Section 1B — Phase 1 exit criteria RESTRUCTURED (maintainer decision)
+
+Tier A is not landing. Rather than leave Phase 1 permanently open against a
+dependency outside this work, **Phase 1 exits on tier B**, and everything that
+genuinely requires real documents moves to a new **Phase 1A**.
+
+| | exits on | state |
+|---|---|---|
+| 1.1 lockfiles | — | **DONE** |
+| 1.2 ruff / mypy / pytest green | — | **DONE** |
+| 1.3 httpx port | — | **DONE** |
+| 1.4 reproducible corpus + baseline | the tier-B baseline as reference | **DONE** |
+| 1.5 golden set | 25 entries + the unanswerable additions (32 total) | **DONE** |
+| 1.6 CI gate | retrieval-mode gate ACTIVE | **DONE** |
+
+**Phase 1A — deferred until tier A exists:**
+
+- ≥60 golden entries drawn from real documents.
+- The **metric-regression half of 1.6**. The workflow scans `eval/baselines/`
+  for a provenance-complete file and, finding none suitable, emits a warning
+  that the regression gate is **INACTIVE** rather than passing silently.
+  Gated *today*: corpus integrity, embedding-model identity, golden-set schema,
+  `needs_rewrite()` branch agreement, retrieval determinism.
+- Any **relevance** threshold. C2's gap margin and C4's normalised cut are both
+  corpus-shape-sensitive in a way C3's abstention floor is not.
+
+`docs/HANDOFF.md` records, as directed, that the headline baseline is
+synthetic, tier-B-shaped, deliberately table/list/OCR-heavy, and that **no
+threshold in this system has been validated against real-world document
+composition**.
+
+
+## PROPOSAL P-2 — DECIDED: candidate C3
+Status: ACCEPTED and implemented · Commit: `d3aab92`
+
+The maintainer chose C3 on a property that was **not in my candidate list**,
+and the reasoning corrects an omission in the proposal:
+
+> C3 is the only candidate that restores the instrument. C2 keeps rank 1 when
+> it dominates — which still returns **one item**. `mrr_at_k == hit_at_k`
+> stays exact, 60% of entries stay pinned, and the harness remains unable to
+> distinguish a retrieval improvement from a no-op.
+
+I had scored the candidates on whether they fix the *defect*. I had not scored
+them on whether they fix the *measurement*, even after writing the sensitivity
+finding myself. C2 would have improved hit@k while leaving the harness blind.
+
+### Implemented
+
+    ABSTENTION  abstention_score_floor = 0.01, applied ONCE to the best
+                candidate. Below it, even the top hit is one the cross-encoder
+                confidently rejects.
+    ORDERING    the reranker's job. rerank_top_n bounds the count. No
+                per-chunk relevance judgement by default.
+
+`rerank_score_floor` is **not deleted** — it defaults to `0.0`, and a test
+pins that restoring `0.25` reproduces the old behaviour exactly. Both numbers
+sit in the provenance tuple, so any baseline recorded either side of this
+change is flagged as **semantic drift** rather than silently diffed.
+
+### Why the abstention bar is not gated on tier A
+
+Once the two jobs are separated, the bar answers *"did retrieval return
+anything coherent?"*, not *"is this relevant?"*. A cross-encoder sigmoid below
+0.01 is a logit near −4.6: the model is confidently rejecting its own best
+candidate. That is tied to the **model's** confidence semantics, not to a
+corpus's composition — principled rather than measured, and documented as such.
+
+Falsification is unchanged: **if distractors are admitted on unanswerable
+queries, C3 is wrong.**
+
+### One note on the brief
+
+The instruction said to set the bar "well below your 0.387 minimum". 0.387 was
+the minimum **rewrite similarity** (finding #28), a different measurement in a
+different space. The reranker's observed rank-1 output spans **0.0003 to
+0.9999**. The bar was set from that range and from the logit reasoning above,
+which I believe is what was intended; recorded here in case it was not.
+
+
+## Golden set: unanswerable entries 3 → 10
+Status: DONE (done FIRST, before reading any C3 result, as directed)
+
+`correct_abstention_rate = 1.000` over three entries cannot validate the one
+thing C3 is most likely to break. Seven added, two kinds, both languages:
+
+**Near miss — the topic IS covered, the specific asked for is not**
+
+- *"Who can authorise an exception to the seven-year retention period?"* — b01
+  states the period **and** the authorisation rule, and nothing about
+  exceptions. Shares almost all its vocabulary with the answering chunk.
+- *"What happens to an incident that is still unresolved after the duty
+  supervisor has been notified?"* — b02 escalates at 72 hours and stops.
+- *"Quel montant est accorde aux demandes soumises apres le 31 mars ?"* — b13
+  gives both the deadline and the ceiling, and nothing about late applications.
+
+**Absent specific — plausible values that do not exist**
+
+- *"How long is the maintenance window for the payroll system?"* — the b06
+  table lists `billing` and `reporting` only.
+- *"What revenue did the West region record in Q1 of the following year?"* —
+  b03 covers one year. Nearly identical wording to an answerable entry.
+- *"What penalty applies when uptime falls below 95 percent?"* — b08 defines
+  credits below 99.5 percent.
+- *"Combien de jours de preavis faut-il pour resilier le contrat CT-9002 ?"* —
+  b04 carries CT-9001 only. Returning the CT-9001 notice period here would be a
+  confidently wrong answer, not a near miss.
+
+    total 32   answerable 22   unanswerable 10   (7 en / 3 fr)
