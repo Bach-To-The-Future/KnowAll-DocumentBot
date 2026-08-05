@@ -161,7 +161,9 @@ def _row(**kw):
     base = {"question": "q?", "tier": "b", "category": "plain-fact", "language": "en",
             "kind": "answerable", "low_overlap": True, "recall_at_fetch": True,
             "hit_at_k": True, "reciprocal_rank": 1.0, "falsely_abstained": False,
-            "rewrite_would_fire": False, "rewrite_fired": False}
+            "rewrite_would_fire": False, "rewrite_fired": False,
+            "rewrite_reason": "not-needed", "rewrite_similarity": None,
+            "rewrite_rejected_text": None, "original_question": "q?"}
     base.update(kw)
     return base
 
@@ -261,3 +263,25 @@ def test_full_mode_refuses_to_run_with_the_answer_cache_enabled() -> None:
 
 def test_full_mode_runs_with_the_cache_disabled() -> None:
     gate_full_mode(_Settings(enable_answer_cache=False))  # type: ignore[arg-type]
+
+
+def test_a_rewrite_rejected_as_drift_is_counted_and_named() -> None:
+    """Finding #28: a rejected rewrite leaves standalone == original, so it is
+    invisible in hit@k. If the harness does not count it, a drift epidemic
+    reads as a quiet conversation."""
+    rows = [
+        _row(rewrite_would_fire=True, rewrite_reason="drift",
+             rewrite_similarity=0.31, rewrite_rejected_text="wrong subject"),
+        _row(rewrite_would_fire=True, rewrite_fired=True, rewrite_reason="ok",
+             rewrite_similarity=0.95),
+    ]
+    rw = summarize(rows)["rewrite"]
+    assert rw["n_rejected_as_drift"] == 1
+    assert rw["reasons"] == {"drift": 1, "ok": 1}
+    assert rw["similarity_min"] == 0.31
+    assert rw["rejected"][0]["rewritten"] == "wrong subject"
+
+
+def test_similarity_stats_are_absent_rather_than_zero_when_unmeasured() -> None:
+    rw = summarize([_row()])["rewrite"]
+    assert rw["similarity_min"] is None and rw["similarity_median"] is None

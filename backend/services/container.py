@@ -55,7 +55,7 @@ def build_container(settings: Settings) -> ServiceContainer:
     telemetry = Telemetry(cache)
 
     retrieval = RetrievalService(vector_store, embedder, reranker, settings)
-    query = QueryService(retrieval, llm, cache, memory, telemetry, settings)
+    query = QueryService(retrieval, llm, cache, memory, telemetry, settings, embedder)
     ingestion = IngestionService(storage, job_store, vector_store, embedder, cache, settings)
 
     return ServiceContainer(

@@ -112,3 +112,21 @@ class FakeCache(CacheStore):
 
     def list_range(self, key: str, count: int) -> list[str]:
         return self.lists.get(key, [])[:count]
+
+
+class ScriptedEmbedder(DenseEmbedder):
+    """Maps exact strings to vectors so a test can dictate cosine similarity.
+
+    Unknown text gets an orthogonal vector, so anything the test did not name
+    is maximally dissimilar — a rewrite the test forgot to script reads as
+    drift rather than silently passing the guard.
+    """
+
+    def __init__(self, vectors: dict[str, list[float]]) -> None:
+        self._vectors = vectors
+
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        return [self.embed_query(t) for t in texts]
+
+    def embed_query(self, text: str) -> list[float]:
+        return self._vectors.get(text, [0.0, 0.0, 1.0])

@@ -75,6 +75,15 @@ class Settings(BaseSettings):
     llm_read_timeout: int = 300  # CPU inference is slow, but never unbounded
     openai_api_key: str | None = None
 
+    # Finding #28 — semantic-drift guard on query rewrite. A rewrite whose
+    # cosine similarity to the original question falls below this is discarded
+    # and the original is used. Deliberately LOW: this is a safety net against
+    # gross topic replacement (measured: a records-retention follow-up rewritten
+    # as a hazardous-waste question), not a quality knob. Raising it starts
+    # rejecting legitimate rewrites, which is a retrieval-quality change and
+    # needs a measured before/after. NOT calibrated against tier A yet.
+    rewrite_min_similarity: float = 0.55
+
     @computed_field  # type: ignore[prop-decorator]
     @property
     def llm_model(self) -> str:

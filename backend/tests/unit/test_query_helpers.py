@@ -7,16 +7,16 @@ from models.schemas import RetrievedChunk
 from services.ingestion import sanitize_object_name
 from services.memory import SessionMemory
 from services.query import QueryService
-from tests.unit.fakes import FakeCache, FakeLLM
+from tests.unit.fakes import FakeCache, FakeEmbedder, FakeLLM, ScriptedEmbedder
 
 
-def make_service(llm: FakeLLM) -> QueryService:
-    settings = Settings(_env_file=None)
+def make_service(llm: FakeLLM, embedder=None, **overrides) -> QueryService:
+    settings = Settings(_env_file=None, **overrides)
     cache = FakeCache()
     # Retrieval isn't exercised by these helper tests.
     return QueryService(retrieval=None, llm=llm, cache=cache,  # type: ignore[arg-type]
                         memory=SessionMemory(cache), telemetry=Telemetry(cache),
-                        settings=settings)
+                        settings=settings, embedder=embedder or FakeEmbedder())
 
 
 HISTORY = [{"question": "x", "answer": "y"}]
@@ -83,3 +83,87 @@ def test_sanitize_collapses_paths(raw, expected):
 def test_sanitize_rejects_invalid(bad):
     with pytest.raises(InvalidRequestError):
         sanitize_object_name(bad)
+
+
+# --- finding #28: rewrite semantic-drift guard --------------------------------
+
+ORIGINAL = "And the disposal rule?"
+# The real rewrite observed in full-mode run 2026-08-04. Fluent, correctly
+# sized, past every pre-existing guard, and about a different subject.
+DRIFTED = "What is the policy on disposing of hazardous waste?"
+FAITHFUL = "What is the records disposal rule?"
+
+VECTORS = {
+    ORIGINAL: [1.0, 0.0, 0.0],
+    FAITHFUL: [0.95, 0.31, 0.0],   # cosine ~0.95
+    DRIFTED: [0.30, 0.95, 0.0],    # cosine ~0.30
+}
+
+
+def drift_service(response: str, **overrides) -> QueryService:
+    return make_service(FakeLLM(response=response),
+                        embedder=ScriptedEmbedder(VECTORS), **overrides)
+
+
+def test_a_fluent_correctly_sized_rewrite_about_the_wrong_subject_is_rejected():
+    """The failure mode the old guards could not see. Length and non-emptiness
+    say nothing about whether the subject survived."""
+    result = drift_service(DRIFTED).rewrite(ORIGINAL, HISTORY)
+    assert result.text == ORIGINAL          # fell back
+    assert result.fired is False
+    assert result.reason == "drift"
+    assert result.rejected_text == DRIFTED  # kept for forensics
+    assert result.similarity is not None and result.similarity < 0.55
+
+
+def test_a_faithful_rewrite_is_kept():
+    result = drift_service(FAITHFUL).rewrite(ORIGINAL, HISTORY)
+    assert result.text == FAITHFUL
+    assert result.fired is True
+    assert result.reason == "ok"
+    assert result.similarity is not None and result.similarity > 0.9
+
+
+def test_the_drifted_rewrite_passes_every_pre_existing_guard():
+    """Pins WHY finding #28 exists: the old code checked non-empty and length,
+    and this rewrite satisfies both. Without the similarity guard it ships."""
+    assert DRIFTED                                          # not empty
+    assert len(DRIFTED) <= 4 * max(len(ORIGINAL), 80)       # not over-long
+    # ...and it is still the wrong question.
+    assert drift_service(DRIFTED, rewrite_min_similarity=0.0).rewrite(
+        ORIGINAL, HISTORY).text == DRIFTED
+
+
+def test_an_unmeasurable_similarity_never_rejects():
+    """A broken embedder must degrade to the old behaviour, not start
+    discarding every rewrite."""
+    result = make_service(FakeLLM(response=DRIFTED),
+                          embedder=FakeEmbedder()).rewrite(ORIGINAL, HISTORY)
+    assert result.similarity is None
+    assert result.text == DRIFTED
+    assert result.fired is True
+
+
+def test_rejection_is_distinguishable_from_never_attempted():
+    """Both leave standalone == original. If the trace cannot tell them apart,
+    a drift epidemic looks exactly like a quiet conversation."""
+    rejected = drift_service(DRIFTED).rewrite(ORIGINAL, HISTORY)
+    skipped = drift_service(DRIFTED).rewrite(ORIGINAL, [])
+    assert rejected.text == skipped.text == ORIGINAL
+    assert rejected.reason == "drift" and skipped.reason == "no-history"
+
+
+def test_llm_failure_still_falls_back_without_consulting_the_embedder():
+    def explode(*a, **k):
+        raise AssertionError("embedder must not be called when the LLM failed")
+
+    service = make_service(FakeLLM(error=RuntimeError("boom")),
+                           embedder=ScriptedEmbedder(VECTORS))
+    service._embedder.embed_query = explode  # type: ignore[method-assign]
+    result = service.rewrite(ORIGINAL, HISTORY)
+    assert result.text == ORIGINAL and result.reason == "llm-error"
+
+
+def test_empty_and_overlong_rewrites_keep_their_own_reasons():
+    assert drift_service("").rewrite(ORIGINAL, HISTORY).reason == "empty"
+    assert drift_service("x" * 1000).rewrite(ORIGINAL, HISTORY).reason == "too-long"

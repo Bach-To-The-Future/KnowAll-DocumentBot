@@ -6,6 +6,7 @@ telemetry. Transport-free: routers only wrap its outputs.
 import hashlib
 import json
 import logging
+import math
 import os
 import re
 from collections.abc import AsyncIterator
@@ -16,7 +17,7 @@ from starlette.concurrency import run_in_threadpool
 
 from core.config import Settings
 from core.exceptions import InvalidRequestError
-from core.interfaces import CacheStore, LLMClient
+from core.interfaces import CacheStore, DenseEmbedder, LLMClient
 from core.telemetry import Telemetry, log_event, new_trace_id, timed
 from models.schemas import QueryRequest, RetrievedChunk
 from services.memory import SessionMemory
@@ -62,6 +63,17 @@ _ANAPHORA_RE = re.compile(
 )
 
 
+@dataclass(frozen=True)
+class RewriteResult:
+    """What the rewrite did, and why — so a rejection is visible in the trace
+    instead of looking identical to "the question was already standalone"."""
+    text: str
+    fired: bool
+    reason: str                        # no-history | llm-error | empty | too-long | drift | ok
+    similarity: float | None = None
+    rejected_text: str | None = None   # the drifted rewrite, kept for forensics
+
+
 @dataclass
 class PreparedQuery:
     citations: list[dict[str, Any]]
@@ -75,13 +87,16 @@ class PreparedQuery:
 class QueryService:
     def __init__(self, retrieval: RetrievalService, llm: LLMClient,
                  cache: CacheStore, memory: SessionMemory, telemetry: Telemetry,
-                 settings: Settings) -> None:
+                 settings: Settings, embedder: DenseEmbedder) -> None:
         self._retrieval = retrieval
         self._llm = llm
         self._cache = cache
         self._memory = memory
         self._telemetry = telemetry
         self._settings = settings
+        # Only used by the rewrite drift guard (#28). Query embeddings are
+        # cached, so this shares work with retrieval rather than duplicating it.
+        self._embedder = embedder
 
     # --- rewrite & expansion ---------------------------------------------------
 
@@ -94,11 +109,42 @@ class QueryService:
             return True  # short follow-ups are usually elliptical
         return bool(_ANAPHORA_RE.search(question))
 
+    def _rewrite_similarity(self, original: str, rewritten: str) -> float | None:
+        """Cosine between the original and the rewritten query, in the same
+        embedding space retrieval uses.
+
+        None means "could not measure" — never a rejection. Query embeddings
+        are cached, and the original is embedded moments later by retrieval, so
+        the marginal cost is one embedding call on a rewrite (~20% of queries).
+        """
+        try:
+            a = self._embedder.embed_query(original)
+            b = self._embedder.embed_query(rewritten)
+        except Exception as e:
+            logger.warning(f"Rewrite similarity unavailable, guard skipped: {e}")
+            return None
+        dot = sum(x * y for x, y in zip(a, b, strict=True))
+        norm = math.sqrt(sum(x * x for x in a)) * math.sqrt(sum(y * y for y in b))
+        return (dot / norm) if norm else None
+
     def standalone_question(self, question: str, history: list[dict[str, str]]) -> str:
+        return self.rewrite(question, history).text
+
+    def rewrite(self, question: str, history: list[dict[str, str]]) -> RewriteResult:
         """Rewrite a follow-up into a standalone query. Best-effort: any
-        failure or degenerate output falls back to the original question."""
+        failure, degenerate output, or SEMANTIC DRIFT falls back to the
+        original question.
+
+        Finding #28: the previous guards caught exceptions, empty output and
+        gross length overruns — every failure mode except the one that
+        actually happens. A records-retention follow-up came back rewritten as
+        "What is the policy on disposing of hazardous waste?": fluent,
+        correctly sized, and past every check. The similarity guard below is
+        the one that can see that, because it measures meaning rather than
+        shape, in the same space retrieval scores in.
+        """
         if not history:
-            return question
+            return RewriteResult(question, fired=False, reason="no-history")
         transcript = "\n".join(
             f"User: {turn['question']}\nAssistant: {turn['answer']}" for turn in history
         )
@@ -109,11 +155,24 @@ class QueryService:
             rewritten = lines[0] if lines else ""
         except Exception as e:
             logger.warning(f"Query rewrite failed, using original question: {e}")
-            return question
+            return RewriteResult(question, fired=False, reason="llm-error")
         # Sanity bounds: an empty or rambling rewrite is worse than the original.
-        if not rewritten or len(rewritten) > 4 * max(len(question), 80):
-            return question
-        return rewritten
+        if not rewritten:
+            return RewriteResult(question, fired=False, reason="empty")
+        if len(rewritten) > 4 * max(len(question), 80):
+            return RewriteResult(question, fired=False, reason="too-long")
+
+        similarity = self._rewrite_similarity(question, rewritten)
+        floor = self._settings.rewrite_min_similarity
+        if similarity is not None and similarity < floor:
+            logger.warning(
+                f"Query rewrite REJECTED as semantic drift "
+                f"(similarity {similarity:.3f} < {floor}). "
+                f"original={question!r} rewritten={rewritten!r}"
+            )
+            return RewriteResult(question, fired=False, reason="drift",
+                                 similarity=similarity, rejected_text=rewritten)
+        return RewriteResult(rewritten, fired=True, reason="ok", similarity=similarity)
 
     def expand_queries(self, question: str) -> list[str]:
         """Generate query variations for recall. Best-effort: failures mean
@@ -196,9 +255,10 @@ class QueryService:
 
         with timed(timings, "rewrite_ms"):
             if self.needs_rewrite(req.question, history):
-                standalone = self.standalone_question(req.question, history)
+                rewrite = self.rewrite(req.question, history)
             else:
-                standalone = req.question
+                rewrite = RewriteResult(req.question, fired=False, reason="not-needed")
+        standalone = rewrite.text
 
         # Vectors store `source` as the sanitized basename; clients may send
         # full MinIO keys. Normalize so prefixed keys still match.
@@ -250,6 +310,12 @@ class QueryService:
             "session_id": req.session_id,
             "original_question": req.question,
             "standalone_question": standalone,
+            # Finding #28: a rewrite that was rejected as drift must not look
+            # identical in the trace to one that was never attempted.
+            "rewrite_fired": rewrite.fired,
+            "rewrite_reason": rewrite.reason,
+            "rewrite_similarity": rewrite.similarity,
+            "rewrite_rejected_text": rewrite.rejected_text,
             "expanded_queries": expansions,
             "filters": req.documents,
             "chunks": [

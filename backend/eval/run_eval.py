@@ -192,6 +192,10 @@ def _retrieve_retrieval_mode(container: Any, entry: dict, k: int) -> tuple[list,
     return candidates, chunks, {
         "rewrite_would_fire": QueryService.needs_rewrite(q, entry.get("history", [])),
         "rewrite_fired": False,
+        "rewrite_reason": "retrieval-mode",
+        "rewrite_similarity": None,
+        "rewrite_rejected_text": None,
+        "original_question": q,
         "standalone_question": q,
     }
 
@@ -220,11 +224,19 @@ def _retrieve_full_mode(container: Any, entry: dict, k: int,
     # against the REWRITTEN question — the same query the final ranking saw.
     candidates = (container.retrieval.fetch_candidates(standalone, filters=None)
                   if entry["answerable"] else [])
+    trace = prepared.trace
     return candidates, chunks, {
         "rewrite_would_fire": would_fire,
-        "rewrite_fired": standalone != q,
+        # Finding #28: `standalone != q` conflates "not attempted", "attempted
+        # and identical" and "attempted, drifted, rejected". Take the service's
+        # own verdict; fall back to the text comparison only for older traces.
+        "rewrite_fired": bool(trace.get("rewrite_fired", standalone != q)),
+        "rewrite_reason": trace.get("rewrite_reason"),
+        "rewrite_similarity": trace.get("rewrite_similarity"),
+        "rewrite_rejected_text": trace.get("rewrite_rejected_text"),
+        "original_question": q,
         "standalone_question": standalone,
-        "expanded_queries": prepared.trace.get("expanded_queries", []),
+        "expanded_queries": trace.get("expanded_queries", []),
     }
 
 
@@ -345,9 +357,29 @@ def summarize(rows: list[dict]) -> dict[str, Any]:
     }
 
     branch_rows = [r for r in rows if "rewrite_branch_ok" in r]
+    sims = [r["rewrite_similarity"] for r in rows
+            if r.get("rewrite_similarity") is not None]
+    reasons: dict[str, int] = {}
+    for r in rows:
+        reason = r.get("rewrite_reason")
+        if reason:
+            reasons[reason] = reasons.get(reason, 0) + 1
     rewrite = {
         "n_would_fire": sum(1 for r in rows if r["rewrite_would_fire"]),
         "n_fired": sum(1 for r in rows if r["rewrite_fired"]),
+        # Finding #28. A rejected rewrite is invisible in hit@k -- it just looks
+        # like the question was already standalone -- so it is counted here.
+        "n_rejected_as_drift": sum(1 for r in rows
+                                   if r.get("rewrite_reason") == "drift"),
+        "reasons": reasons,
+        "similarity_min": round(min(sims), 4) if sims else None,
+        "similarity_median": round(statistics.median(sims), 4) if sims else None,
+        "rejected": [
+            {"original": r["original_question"],
+             "rewritten": r["rewrite_rejected_text"],
+             "similarity": r["rewrite_similarity"]}
+            for r in rows if r.get("rewrite_reason") == "drift"
+        ],
         "n_branch_asserted": len(branch_rows),
         "branch_mismatches": [
             {"question": r["question"], "expected": r["expects_rewrite"],
@@ -478,7 +510,15 @@ def main() -> int:
 
     rw = baseline["rewrite"]
     print(f"\n-- rewrite --\n  would_fire={rw['n_would_fire']}  fired={rw['n_fired']}  "
+          f"rejected_as_drift={rw['n_rejected_as_drift']}  "
           f"branch_asserted={rw['n_branch_asserted']}")
+    print(f"  reasons={rw['reasons']}")
+    if rw["similarity_median"] is not None:
+        print(f"  similarity: min={rw['similarity_min']} median={rw['similarity_median']}")
+    for rejected in rw["rejected"]:
+        print(f"  REJECTED AS DRIFT (sim={rejected['similarity']}):")
+        print(f"    original : {rejected['original']}")
+        print(f"    rewritten: {rejected['rewritten']}")
     if rw["branch_mismatches"]:
         print("  BRANCH MISMATCHES (needs_rewrite() disagrees with the golden set):")
         for m in rw["branch_mismatches"]:
