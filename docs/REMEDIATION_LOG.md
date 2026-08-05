@@ -66,6 +66,9 @@ Verdict key: **CONFIRMED** · **ALREADY FIXED** · **INCORRECT — actual state 
 | **25** | **P2** | Base images pinned by tag and fastembed model repos unpinned — no build was reproducible, so no baseline was either | `api/Dockerfile`, `frontend/Dockerfile` | **RESOLVED** (`4e43c04`) |
 | 26 | P3 | apt-installed tesseract and its traineddata are unpinned; an OCR output change would leave no diff in this repository | `api/Dockerfile` apt layer | **OPEN** — Phase 4, vendor tessdata from a tagged release |
 | **27** | **P1** | `rerank_score_floor` is an absolute cut on a cross-encoder score whose scale tracks chunk SHAPE (prose vs table/list/OCR). Correctly-ranked first-place chunks are discarded and the user sees an abstention | tier-B baseline: `recall@fetch=1.0` vs `hit@k=0.318`, all 15 failures returned 0 chunks; 3/21 on the real corpus, all table/list answers | **OPEN** — P1 (promoted from P2: the entire quality gap is post-retrieval). Diagnostics done, PROPOSAL P-2 pending, no knob touched |
+| **28** | **P1** | Query-rewrite fallback catches exceptions, empty output and length overruns but NOT semantic drift. A records-retention follow-up rewritten as a hazardous-waste question is fluent, correctly sized, and passes every guard | full-mode run 2026-08-04; 3-5 distinct rewrites per input over 10 calls | **FIXED** (`b6a6f00`) — embedding-similarity guard + per-entry instrumentation |
+| **29** | P2 | csv, xlsx and pptx chunks carry no `section_title` at all, so section expansion degraded to a ±1 window and the reranker saw bare row-groups | 13/22 rank-1 chunks on tier B had no section metadata | **FIXED** (`64b9a35`) |
+| **30** | P2 | `_expand_context()` runs AFTER the score floor, so enrichment can never influence the discard decision | `retrieval.py:182` floor vs `:188` expand | **PINNED, not fixed** (`414de43`) — the fix IS P-2 candidate C1 |
 
 ## 0.3 Finding 15 — correction
 
@@ -1029,6 +1032,19 @@ a passage rather than a fragment.
 *Cost:* changes stored text ⇒ **reindex** ⇒ new corpus provenance, and it is a
 chunking-adjacent change, so it needs its own approval under R5.
 
+> **AMENDED after the F29/F30 split.** C1 is not separable from finding #30.
+> Enriching what the cross-encoder scores means enriching *before* the floor,
+> and today the pipeline is `fetch → rerank → floor → top-k → expand`, so any
+> enrichment that reaches the scorer **is** a reordering. C1's real cost is
+> therefore the reindex **plus** reranking substantially longer text for every
+> candidate on every query. Listing C1 and #30 as separate items made C1 look
+> cheaper than it is.
+>
+> Partly discharged already: F29 (`64b9a35`) gave csv/xlsx/pptx a
+> `section_title`, so the metadata C1 needs now exists for those three formats.
+> PDF still has none. Nothing consumes it at rerank time — that step is C1 and
+> remains pending.
+
 **C2 — Gap-based or relative keep-criterion.** Keep rank 1 when it leads rank 2
 by a margin, independent of absolute value; keep lower ranks only above a floor.
 *Attacks:* the 13/20 correct answers the absolute floor discards.
@@ -1262,3 +1278,145 @@ unaffected. The mechanism nonetheless permits a mismatch.
 `git_sha` is the repository pointer at launch and may run ahead of the image.
 `baselines/README.md` now says so. Anyone diffing two baselines should trust the
 image digest.
+
+
+## CORRECTION — the variance result is a SENSITIVITY finding, not a stability one
+Applies to: the full-mode entry above · directed by the maintainer
+
+The previous entry reported "spread 0.0 across a provably stochastic pipeline"
+and drew the right operational conclusion (do not set the tolerance) from the
+wrong framing. Stated correctly:
+
+> **0.0 spread across a pipeline that is demonstrably non-deterministic means
+> the harness cannot currently detect change. It is a statement about the
+> instrument, not about the system.**
+
+The corroborating tell is `mrr_at_k == hit_at_k` *exactly*, in both modes
+(0.318/0.318 and 0.409/0.409). Two metrics reporting one bit of information,
+because results never exceed one item. A measuring instrument whose two
+channels are perfectly correlated is reporting its own floor, not the signal.
+
+Consequences, all of which follow from sensitivity rather than stability:
+
+- The nightly full-mode job stays **non-gating**. It records spread; it does
+  not act on it.
+- Zero spread must never be cited as evidence that a change was safe. It is
+  currently consistent with *any* change to the LLM path.
+- Detecting change requires the metric to be able to move, which requires
+  finding #27 to lift. Sensitivity is blocked on #27, not on tier A.
+- The retrieval-mode zero is a different claim and still stands: that mode has
+  no LLM in it, so there is nothing for the metric to be insensitive *to*.
+
+
+## Finding #27's first diagnostic produced TWO findings — now split
+Directed by the maintainer: track them separately, since they are separately
+testable and separately fixable.
+
+| # | Sev | Finding | Status |
+|---|-----|---------|--------|
+| **29** | P2 | csv, xlsx and pptx chunks carry **no section metadata at all** | **FIXED** — `64b9a35` |
+| **30** | P2 | `_expand_context()` runs **after** the floor, so enrichment can never influence the discard decision | **PINNED, not fixed** — `414de43`; entangled with P-2 C1 |
+
+
+## F29 (P2) — extractor metadata gap
+Status: FIXED · Commit: `64b9a35`
+
+13 of 22 rank-1 chunks on tier B carried no `section_title`, and they were
+exactly the extractors that build no heading stack — only `docx_format.py` and
+`txt.py` did. Two real consequences: `_expand_with_sections` fell through to a
+plain ±1 window so row-groups of one table were never related to each other,
+and the cross-encoder received a bare row-group whose leading line was a CSV
+header with nothing saying which table it came from.
+
+    csv   ->  "Table: <stem>"        one section per file
+    xlsx  ->  "Sheet: <name>"        matches the prefix the text already carries
+    pptx  ->  "Slide N: <title>"     falls back to "Slide N", never absent
+
+**PDF deliberately excluded.** Its chunks are pages; a per-page section title
+would make every section a singleton — strictly worse than the ±1 window it
+uses today. PDFs still have no document-level title in their reranker input.
+That is P-2 candidate C1 and is *not* fixed here.
+
+Metadata only: the embedded text is unchanged, so the corpus manifest hash and
+every vector are identical and a before/after stays COMPARABLE. Re-ingest
+produced **18 chunks from 13 documents — the same count as before**, which is
+the check that no chunking changed.
+
+Five tests run the real extractors over fixtures built in the test, including a
+regression guard that no chunk from these three formats may lack the field.
+
+
+## F30 (P2) — enrichment arrives after the decision it should inform
+Status: PINNED, NOT FIXED · Commit: `414de43`
+
+    fetch -> rerank -> FLOOR (retrieval.py:182) -> top-k -> expand (:188)
+
+A chunk discarded for scoring 0.16 against a floor of 0.25 is discarded on the
+merits of its **bare** text, and the section context that might have lifted it
+is fetched only for its luckier neighbours.
+
+Four characterization tests pin it: a discarded chunk's section is never even
+requested; survivors do get context; the reranker provably sees bare text; and
+the same ordering holds in window mode.
+
+**Why pinned rather than fixed — and this changes proposal P-2.** Moving
+expansion before the floor means the cross-encoder scores *expanded* text. That
+is candidate **C1 in everything but name**. So:
+
+> **C1 and F30 cannot be decided independently.** C1's true cost is not only
+> the reindex — it is reranking substantially longer text for every candidate,
+> on every query. Listing them as separate items made C1 look cheaper than it
+> is.
+
+Until that decision lands, the tests make the ordering explicit and fail loudly
+if anyone reorders it by accident.
+
+
+## F28 (P1) — the rewrite fallback cannot see semantic drift
+Status: FIXED (guard + instrumentation) · Commit: `b6a6f00`
+
+`query.py` caught exceptions, empty output and gross length overruns — every
+failure mode except the one that actually happens. Observed in the full-mode
+run: a records-retention follow-up rewritten as *"What is the policy on
+disposing of hazardous waste?"* — fluent, correctly sized, past every guard,
+about a different subject. A test pins that it satisfies both pre-existing
+checks.
+
+The guard measures **meaning, not shape**: cosine between the original and the
+rewritten query in the same embedding space retrieval scores in. An
+unmeasurable similarity is never a rejection — it degrades to the old
+behaviour rather than discarding every rewrite.
+
+**Instrumentation matters as much as the guard.** A rejected rewrite leaves
+`standalone == original`, indistinguishable in hit@k from a question that was
+already standalone. `RewriteResult` now carries `fired`, `reason`
+(`no-history | not-needed | llm-error | empty | too-long | drift | ok`), the
+similarity and the rejected text; the harness records all of it per entry and
+reports `n_rejected_as_drift`, the reason histogram and similarity min/median.
+
+### Measured distribution — guard disabled, 5 entries × 6 calls
+
+    n=30   min 0.387   median 0.692   max 1.000
+    0.45 / 0.50 / 0.55   reject   6/30 (20%)
+    0.60 / 0.65          reject  13/30 (43%)
+    0.70                 reject  18/30 (60%)
+
+The 6 rejected at 0.55 are all one entry: *"Et le stock de securite ?"* →
+*"What does the reorder point list?"* — wrong subject (the entry asks for
+`safety_stock=15`, the rewrite asks for `reorder_point=25`) **and** wrong
+language.
+
+### Honest limits, recorded rather than glossed
+
+- `0.55` was chosen **a priori**; the measurement is *consistent with* it, not
+  derived from it. Deriving a threshold from the tier-B distribution would be
+  the overfitting this log keeps warning about.
+- It catches **gross** drift only. *"And the disposal rule?"* → *"What kind of
+  records is covered under the retention policy?"* scores 0.596 and passes,
+  though it is also drifted. Catching that costs 43% of rewrites, which is a
+  retrieval-quality change needing a measured before/after.
+- Sample is 30 rewrites, one model, tier B only.
+
+**No LLM seed was set**, as directed: a seed would make the eval reproducible
+while hiding the nondeterminism real users get — the opposite of what this
+harness is for.
