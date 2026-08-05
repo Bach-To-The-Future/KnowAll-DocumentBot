@@ -106,13 +106,52 @@ def main() -> int:
               "  whose vectors cannot be attributed to anything.", file=sys.stderr)
         return 2
 
-    keys = container.storage.list_keys()
-    print(f"collection : {settings.qdrant_collection}")
-    print(f"bucket     : {container.storage.bucket}")
-    print(f"documents  : {len(keys)}")
-    print(f"embed model: {settings.embed_model} @ {digest}\n")
+    # The set to reindex is what the COLLECTION contains, not what the bucket
+    # contains. Enumerating the bucket looked equivalent and is not: this
+    # deployment's bucket held 7 objects with no vectors (backpressure test
+    # fixtures and a deliberately broken file), so a bucket-driven reindex would
+    # have quietly ADDED content to the corpus while claiming to rewrite it.
+    # A reindex must not change corpus membership.
+    client = container.vector_store._get_client()
+    points, _ = client.scroll(settings.qdrant_collection, limit=100_000,
+                              with_payload=["source"], with_vectors=False)
+    in_collection = {(p.payload or {}).get("source") for p in points}
+    in_collection.discard(None)
+    in_bucket = set(container.storage.list_keys())
+
+    keys = sorted(in_collection & in_bucket)
+    unbacked = sorted(in_collection - in_bucket)
+    extra = sorted(in_bucket - in_collection)
+
+    print(f"collection      : {settings.qdrant_collection}")
+    print(f"bucket          : {container.storage.bucket}")
+    print(f"sources indexed : {len(in_collection)}")
+    print(f"to reindex      : {len(keys)}")
+    print(f"embed model     : {settings.embed_model} @ {digest}")
+
+    if extra:
+        print(f"\nSKIPPING {len(extra)} object(s) present in the bucket but NOT in "
+              f"the collection.\n  Reindexing them would ADD content, which is a "
+              f"corpus change, not a migration:")
+        for key in extra:
+            print(f"    {key}")
+        print("  Ingest them deliberately through the normal path if they belong.")
+
+    if unbacked:
+        # Fatal, and worth saying BEFORE a long run rather than after: these
+        # points can never receive a digest, so the final scroll will fail and
+        # enforcement can never be switched on.
+        print(f"\nBLOCKED: {len(unbacked)} source(s) are indexed but have no object "
+              f"in the bucket:", file=sys.stderr)
+        for source in unbacked:
+            print(f"    {source}", file=sys.stderr)
+        print("  Their points cannot be rewritten, so they would remain without a\n"
+              "  digest and DIGEST_ENFORCEMENT_FROM could never be set. Delete them\n"
+              "  from the collection or restore the objects first.", file=sys.stderr)
+        return 2
 
     if args.dry_run:
+        print()
         for key in keys:
             print(f"  would reindex {key}")
         return 0
