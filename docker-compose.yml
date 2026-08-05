@@ -138,6 +138,8 @@ services:
       # Bare hex digest as reported by Ollama /api/tags (NO sha256: prefix).
       # Unset = loud warning; set = hard fail on drift (finding #24).
       EXPECTED_EMBED_MODEL_DIGEST: ${EXPECTED_EMBED_MODEL_DIGEST:-}
+      # Finding #24 extended to the generator (see core/model_identity.py).
+      EXPECTED_LLM_MODEL_DIGEST: ${EXPECTED_LLM_MODEL_DIGEST:-}
       # Phase 2.1 reindex completed 2026-08-05: all 376 points verified to
       # carry embed_model_digest by a full collection scroll. From this marker
       # on, a point WITHOUT a digest is one that escaped the reindex, not an
@@ -194,6 +196,8 @@ services:
       # Bare hex digest as reported by Ollama /api/tags (NO sha256: prefix).
       # Unset = loud warning; set = hard fail on drift (finding #24).
       EXPECTED_EMBED_MODEL_DIGEST: ${EXPECTED_EMBED_MODEL_DIGEST:-}
+      # Finding #24 extended to the generator (see core/model_identity.py).
+      EXPECTED_LLM_MODEL_DIGEST: ${EXPECTED_LLM_MODEL_DIGEST:-}
       # Phase 2.1 reindex completed 2026-08-05: all 376 points verified to
       # carry embed_model_digest by a full collection scroll. From this marker
       # on, a point WITHOUT a digest is one that escaped the reindex, not an

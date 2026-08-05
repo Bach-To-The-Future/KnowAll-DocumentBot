@@ -63,7 +63,10 @@ from typing import Any
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from core.config import Settings, get_settings  # noqa: E402
-from core.model_identity import verify_embedding_model  # noqa: E402
+from core.model_identity import (  # noqa: E402
+    verify_embedding_model,
+    verify_generation_model,
+)
 from eval import provenance  # noqa: E402
 from eval.corpus import verify as corpus_verify  # noqa: E402
 from models.schemas import QueryRequest  # noqa: E402
@@ -457,6 +460,10 @@ def main() -> int:
     if corpus_verify.verify() != 0:
         return 2
     embed_digest = verify_embedding_model(settings, context="eval")
+    # Full mode puts the generator in the retrieval loop, so its identity
+    # matters as much as the embedder's. Retrieval mode never calls it.
+    if args.mode == FULL_MODE:
+        verify_generation_model(settings, context="eval")
     if args.mode == FULL_MODE:
         gate_full_mode(settings)
 

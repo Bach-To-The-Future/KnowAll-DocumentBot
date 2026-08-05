@@ -30,7 +30,7 @@ from arq import Retry
 from arq.connections import RedisSettings
 
 from core.config import Settings, get_settings
-from core.model_identity import verify_embedding_model
+from core.model_identity import verify_embedding_model, verify_generation_model
 from services.container import ServiceContainer, build_container
 
 logging.basicConfig(level=logging.INFO)
@@ -148,6 +148,7 @@ async def startup(ctx: dict) -> None:
     # Same identity gate as the API: a worker that embeds documents with a
     # drifted model would poison the index one job at a time.
     verify_embedding_model(_settings, context="worker startup")
+    verify_generation_model(_settings, context="worker startup")
 
     container = get_container()
     swept = 0

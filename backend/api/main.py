@@ -13,7 +13,7 @@ from api.dependencies import container_from_app, require_api_key
 from api.errors import register_exception_handlers
 from api.routers import documents, query, system
 from core.config import Settings, get_settings
-from core.model_identity import verify_embedding_model
+from core.model_identity import verify_embedding_model, verify_generation_model
 from integrations.llm_clients import ollama_model_available
 from services.container import build_container
 
@@ -58,6 +58,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # with degrades retrieval silently. Unreachable Ollama is NOT a mismatch —
     # that is the readiness check's job, above.
     verify_embedding_model(settings, context="api startup")
+    verify_generation_model(settings, context="api startup")
 
     # Warm retrieval models (no-op when baked into the image); threadpool so
     # a slow download doesn't block the event loop. `warm()` is declared on

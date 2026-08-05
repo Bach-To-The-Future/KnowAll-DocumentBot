@@ -119,6 +119,72 @@ def verify_embedding_model(settings: Settings, *, context: str) -> str | None:
     return observed
 
 
+def verify_generation_model(settings: Settings, *, context: str) -> str | None:
+    """Assert the live generation model matches its pinned digest.
+
+    Extends finding #24 to the generator, which carries the SAME moving-tag
+    exposure the embedding model had and had no enforcement at all.
+
+    The consequence differs, which is why this is a separate function rather
+    than a parameter:
+
+        embedding drift   invalidates every STORED VECTOR. Retrieval silently
+                          degrades and no committed baseline is comparable.
+        generation drift  invalidates every measured claim about ANSWER
+                          BEHAVIOUR — abstention, grounding, instruction
+                          following. The whole of P-3 is a statement about one
+                          specific generator, and swapping it silently makes
+                          those findings describe a model that is no longer
+                          running.
+
+    Same semantics as the embedding check: mismatch is fatal, unset is a loud
+    warning, unreachable is not a mismatch, OpenAI is exempt.
+    """
+    if settings.use_openai_llm:
+        # OpenAI model names are immutable identifiers; no tag to move.
+        return None
+
+    observed = fetch_ollama_digest(settings, settings.llm_model)
+    expected = settings.expected_llm_model_digest
+
+    if not expected:
+        logger.warning(
+            "EXPECTED_LLM_MODEL_DIGEST is not set. Generation-model drift is "
+            "UNDETECTABLE: '%s' is a moving tag, and a republish would silently "
+            "invalidate every measured claim about abstention, grounding and "
+            "instruction-following. Observed digest is %s — pin it to enable "
+            "enforcement.",
+            settings.llm_model,
+            observed or "unavailable",
+        )
+        return observed
+
+    if observed is None:
+        logger.warning(
+            f"[{context}] Generation-model digest could not be resolved; "
+            f"skipping identity enforcement this time."
+        )
+        return None
+
+    if observed != expected:
+        raise ModelIdentityError(
+            f"Generation model identity mismatch at {context}.",
+            detail=(
+                f"model={settings.llm_model} expected={expected} observed={observed}. "
+                f"Every measured claim about answer behaviour was made against a "
+                f"different generator than the one now serving requests. Re-run the "
+                f"generator battery before continuing, or correct "
+                f"EXPECTED_LLM_MODEL_DIGEST if the change was intentional."
+            ),
+        )
+
+    logger.info(
+        f"[{context}] Generation model identity verified: "
+        f"{settings.llm_model} @ {observed[:16]}…"
+    )
+    return observed
+
+
 def verify_three_way(
     settings: Settings, *, context: str, stored_digest: str | None
 ) -> str | None:

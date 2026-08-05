@@ -74,6 +74,13 @@ class Settings(BaseSettings):
     llm_num_predict: int = 1024
     llm_read_timeout: int = 300  # CPU inference is slow, but never unbounded
     openai_api_key: str | None = None
+    # Finding #24 extended to the GENERATOR. Same moving-tag exposure the
+    # embedding model had, different blast radius: embedding drift invalidates
+    # stored vectors, generation drift invalidates every measured claim about
+    # abstention, grounding and instruction-following. All of P-3 is a
+    # statement about one specific generator.
+    # Unset = loud warning; set = hard fail on mismatch.
+    expected_llm_model_digest: str | None = None
 
     # Phase 2.1 — the marker that makes "unknown" temporary.
     #

@@ -14,7 +14,11 @@ import pytest
 
 from core.config import Settings
 from core.exceptions import ModelIdentityError
-from core.model_identity import verify_embedding_model, verify_three_way
+from core.model_identity import (
+    verify_embedding_model,
+    verify_generation_model,
+    verify_three_way,
+)
 
 LIVE = "sha256:0a109f422b47e3a30ba2b10eca18548e944e8a23073ee3f3e947efcf3c45e59f"
 OTHER = "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
@@ -148,3 +152,69 @@ def test_a_mismatched_stored_digest_is_fatal_either_way(observed):
                          digest_enforcement_from=marker),
                 context="test", stored_digest=OTHER,
             )
+
+
+# --- F24 extended to the GENERATION model -------------------------------------
+
+def gen_settings(**kw) -> Settings:
+    kw.setdefault("expected_llm_model_digest", None)
+    kw.setdefault("use_openai_llm", False)
+    return settings(**kw)
+
+
+@pytest.fixture
+def observed_llm(monkeypatch):
+    import core.model_identity as mod
+
+    def _set(value):
+        monkeypatch.setattr(mod, "fetch_ollama_digest", lambda s, m: value)
+
+    return _set
+
+
+def test_generation_mismatch_is_fatal(observed_llm):
+    observed_llm(LIVE)
+    with pytest.raises(ModelIdentityError, match="Generation model identity mismatch"):
+        verify_generation_model(gen_settings(expected_llm_model_digest=OTHER),
+                                context="test")
+
+
+def test_generation_match_passes(observed_llm):
+    observed_llm(LIVE)
+    assert verify_generation_model(
+        gen_settings(expected_llm_model_digest=LIVE), context="test") == LIVE
+
+
+def test_generation_unset_warns_but_does_not_fail(observed_llm, caplog):
+    """Same semantics as the embedding check: unset is loud, never fatal."""
+    observed_llm(LIVE)
+    with caplog.at_level(logging.WARNING):
+        assert verify_generation_model(gen_settings(), context="test") == LIVE
+    assert "UNDETECTABLE" in caplog.text
+    # The warning must name the consequence specific to the GENERATOR.
+    assert "grounding" in caplog.text and "instruction-following" in caplog.text
+
+
+def test_generation_unreachable_is_not_a_mismatch(observed_llm):
+    observed_llm(None)
+    assert verify_generation_model(
+        gen_settings(expected_llm_model_digest=LIVE), context="test") is None
+
+
+def test_openai_generation_is_exempt(monkeypatch):
+    import core.model_identity as mod
+    monkeypatch.setattr(mod, "fetch_ollama_digest",
+                        lambda s, m: pytest.fail("must not query Ollama"))
+    assert verify_generation_model(
+        gen_settings(use_openai_llm=True, expected_llm_model_digest=OTHER),
+        context="test") is None
+
+
+def test_the_two_checks_are_independent(observed_llm):
+    """A pinned embedding model must not imply a pinned generator, or the
+    generator's exposure hides behind the embedding model's enforcement."""
+    observed_llm(LIVE)
+    s = gen_settings(expected_embed_model_digest=LIVE, expected_llm_model_digest=OTHER)
+    assert verify_embedding_model(s, context="test") == LIVE
+    with pytest.raises(ModelIdentityError):
+        verify_generation_model(s, context="test")
