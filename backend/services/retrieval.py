@@ -167,7 +167,36 @@ class RetrievalService:
         scored = sorted(
             zip(scores, candidates, strict=True), key=lambda item: item[0], reverse=True
         )
+        top_score = scored[0][0]
 
+        # Finding #27 / proposal P-2 candidate C3. Two different questions, and
+        # one threshold used to do both was bad at the one that matters.
+        #
+        #   ABSTENTION  "did retrieval return anything coherent at all?"
+        #               A single, very low bar on the BEST candidate. Below it,
+        #               even the top hit is one the cross-encoder confidently
+        #               rejects, and the honest answer is nothing.
+        #   ORDERING    "which of these is most relevant?"
+        #               That is the reranker's job, and rerank_top_n bounds how
+        #               many survive. No per-chunk relevance judgement is made
+        #               here by default.
+        #
+        # The old design applied an absolute relevance floor per chunk, which
+        # discarded correctly-ranked first-place answers whose absolute score
+        # was low because they were tables, lists or OCR text — chunk SHAPE
+        # moves this score as much as relevance does.
+        if top_score < self._settings.abstention_score_floor:
+            logger.info(
+                f"Abstaining: best of {len(candidates)} candidates scored "
+                f"{top_score:.4f}, below the abstention floor "
+                f"{self._settings.abstention_score_floor}"
+            )
+            return []
+
+        # Optional and OFF by default. Kept configurable because a corpus with a
+        # different composition may want it back; setting it above 0 restores
+        # the pre-C3 behaviour and is a retrieval-quality change, so it appears
+        # in the provenance tuple as semantic drift.
         floor = self._settings.rerank_score_floor
         selected = [
             RetrievedChunk(
@@ -182,8 +211,8 @@ class RetrievalService:
             if score >= floor
         ]
         logger.info(
-            f"Reranked {len(candidates)} candidates -> {len(selected)} above score "
-            f"floor {floor} (top score: {scored[0][0]:.3f})"
+            f"Reranked {len(candidates)} candidates -> {len(selected)} returned "
+            f"(top score: {top_score:.4f}, relevance floor: {floor})"
         )
         return self._expand_context(selected)
 

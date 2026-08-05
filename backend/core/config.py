@@ -119,7 +119,23 @@ class Settings(BaseSettings):
     reranker_model: str = "BAAI/bge-reranker-base"
     retrieval_fetch_k: int = 20      # candidates fetched pre-rerank
     rerank_top_n: int = 5            # chunks kept after reranking
-    rerank_score_floor: float = 0.25 # sigmoid floor; calibrate via eval/run_eval.py
+    # Finding #27 / P-2 candidate C3 separated two jobs one number was doing.
+    #
+    # ABSTENTION — "did retrieval return anything coherent?" A cross-encoder
+    # sigmoid below 0.01 is a logit below about -4.6: the model is CONFIDENTLY
+    # rejecting even its own best candidate. That is the principled reading of
+    # "nothing coherent came back", tied to the model's own confidence
+    # semantics rather than fitted to a corpus. It is NOT a relevance judgement
+    # and must not be tuned as one.
+    abstention_score_floor: float = 0.01
+
+    # RELEVANCE — an optional per-chunk cut, now OFF by default. At 0.25 this
+    # discarded correctly-ranked first-place answers whose absolute score was
+    # low because they were tables, lists or OCR text: chunk SHAPE moves this
+    # score as much as relevance does. Ordering is the reranker's job and
+    # rerank_top_n bounds the count. Raising this above 0 restores the pre-C3
+    # behaviour and is a retrieval-quality change.
+    rerank_score_floor: float = 0.0
     # "section" = budgeted parent-section assembly, "window" = ±N chunks
     retrieval_context_mode: Literal["section", "window", "off"] = "section"
     neighbor_window: int = 1

@@ -441,6 +441,83 @@
       "expected_keywords": [],
       "expects_rewrite": false,
       "note": "no exchange-rate content anywhere in the corpus"
+    },
+    {
+      "question": "Who can authorise an exception to the seven-year retention period?",
+      "language": "en",
+      "answerable": false,
+      "tier": "b",
+      "category": "unanswerable",
+      "expected_sources": [],
+      "expected_keywords": [],
+      "expects_rewrite": false,
+      "note": "NEAR MISS. b01 states the seven-year period AND that disposal needs the records officer's authorisation. It says nothing about exceptions. Shares almost all its vocabulary with the answering chunk."
+    },
+    {
+      "question": "What happens to an incident that is still unresolved after the duty supervisor has been notified?",
+      "language": "en",
+      "answerable": false,
+      "tier": "b",
+      "category": "unanswerable",
+      "expected_sources": [],
+      "expected_keywords": [],
+      "expects_rewrite": false,
+      "note": "NEAR MISS. b02 escalates to the duty supervisor at 72 hours and stops there. The question asks for the next step, which does not exist."
+    },
+    {
+      "question": "Quel montant est accorde aux demandes soumises apres le 31 mars ?",
+      "language": "fr",
+      "answerable": false,
+      "tier": "b",
+      "category": "unanswerable",
+      "expected_sources": [],
+      "expected_keywords": [],
+      "expects_rewrite": false,
+      "note": "NEAR MISS (fr). b13 gives both the deadline and the ceiling, and says nothing about late applications."
+    },
+    {
+      "question": "How long is the maintenance window for the payroll system?",
+      "language": "en",
+      "answerable": false,
+      "tier": "b",
+      "category": "unanswerable",
+      "expected_sources": [],
+      "expected_keywords": [],
+      "expects_rewrite": false,
+      "note": "ABSENT SPECIFIC. b06's table lists window_hours for billing and reporting only. 'payroll' is a plausible third row that is not there."
+    },
+    {
+      "question": "What revenue did the West region record in Q1 of the following year?",
+      "language": "en",
+      "answerable": false,
+      "tier": "b",
+      "category": "unanswerable",
+      "expected_sources": [],
+      "expected_keywords": [],
+      "expects_rewrite": false,
+      "note": "ABSENT SPECIFIC. b03 covers Q1-Q4 of one year only. Nearly identical wording to an answerable entry, differing in a period that has no rows."
+    },
+    {
+      "question": "What penalty applies when uptime falls below 95 percent?",
+      "language": "en",
+      "answerable": false,
+      "tier": "b",
+      "category": "unanswerable",
+      "expected_sources": [],
+      "expected_keywords": [],
+      "expects_rewrite": false,
+      "note": "ABSENT SPECIFIC. b08 defines credits below 99.5 percent. 95 percent is a plausible second tier that does not exist."
+    },
+    {
+      "question": "Combien de jours de preavis faut-il pour resilier le contrat CT-9002 ?",
+      "language": "fr",
+      "answerable": false,
+      "tier": "b",
+      "category": "unanswerable",
+      "expected_sources": [],
+      "expected_keywords": [],
+      "expects_rewrite": false,
+      "note": "ABSENT SPECIFIC (fr). b04 carries CT-9001 only. Retrieving the CT-9001 notice period here would be a confidently wrong answer, not a near miss."
     }
   ]
 }
