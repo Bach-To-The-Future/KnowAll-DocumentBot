@@ -75,6 +75,17 @@ class Settings(BaseSettings):
     llm_read_timeout: int = 300  # CPU inference is slow, but never unbounded
     openai_api_key: str | None = None
 
+    # Phase 2.1 — the marker that makes "unknown" temporary.
+    #
+    # Set to an ISO date by the reindex once every point carries an
+    # embed_model_digest. From then on a point WITHOUT one is not "unknown",
+    # it is a point that escaped the reindex, and verify_three_way() treats it
+    # as fatal. Unset, the pre-2.1 semantics hold: no digest means unknown.
+    #
+    # Without this, "unknown" would be permanent and a genuinely unverifiable
+    # collection would be indistinguishable from a verified one forever.
+    digest_enforcement_from: str | None = None
+
     # Finding #28 — semantic-drift guard on query rewrite. A rewrite whose
     # cosine similarity to the original question falls below this is discarded
     # and the original is used. Deliberately LOW: this is a safety net against

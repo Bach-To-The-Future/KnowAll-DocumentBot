@@ -104,3 +104,47 @@ def test_three_way_is_not_retroactive(observed):
         settings(expected_embed_model_digest=LIVE),
         context="test", stored_digest=None,
     ) == LIVE
+
+
+# --- phase 2.1: digest_enforcement_from makes "unknown" temporary ------------
+
+def test_missing_digest_is_unknown_before_enforcement(observed):
+    """The 376 legacy points predate 2.1. Until the reindex has run, a point
+    without a digest is genuinely unverifiable, not wrong."""
+    observed(LIVE)
+    assert verify_three_way(
+        settings(expected_embed_model_digest=LIVE), context="test",
+        stored_digest=None,
+    ) == LIVE
+
+
+def test_missing_digest_is_FATAL_after_enforcement(observed):
+    """Once the reindex has rewritten every point, a point without a digest is
+    one that escaped it. Without this the ambiguity would be permanent."""
+    observed(LIVE)
+    with pytest.raises(ModelIdentityError, match="no embedding-model digest"):
+        verify_three_way(
+            settings(expected_embed_model_digest=LIVE,
+                     digest_enforcement_from="2026-08-05T00:00:00Z"),
+            context="test", stored_digest=None,
+        )
+
+
+def test_a_matching_stored_digest_passes_under_enforcement(observed):
+    observed(LIVE)
+    assert verify_three_way(
+        settings(expected_embed_model_digest=LIVE,
+                 digest_enforcement_from="2026-08-05T00:00:00Z"),
+        context="test", stored_digest=LIVE,
+    ) == LIVE
+
+
+def test_a_mismatched_stored_digest_is_fatal_either_way(observed):
+    observed(LIVE)
+    for marker in (None, "2026-08-05T00:00:00Z"):
+        with pytest.raises(ModelIdentityError, match="different embedding model"):
+            verify_three_way(
+                settings(expected_embed_model_digest=LIVE,
+                         digest_enforcement_from=marker),
+                context="test", stored_digest=OTHER,
+            )

@@ -124,11 +124,32 @@ def verify_three_way(
 ) -> str | None:
     """Config vs. live Ollama vs. the digest recorded on a stored point.
 
-    Wired by 2.1 once `embed_model_digest` is written into vector payloads.
-    `stored_digest=None` means the point predates 2.1 and is treated as
-    unknown — the check is not retroactive.
+    `stored_digest=None` means the point carries no digest. What that MEANS
+    depends on whether the reindex has happened:
+
+      digest_enforcement_from unset   the point predates phase 2.1 and is
+                                      genuinely unknown. Not a mismatch.
+      digest_enforcement_from set     every point was rewritten by the reindex,
+                                      so a missing digest is a point that
+                                      escaped it — fatal, not unknown.
+
+    Without that marker "unknown" would be permanent, and a genuinely
+    unverifiable collection would be indistinguishable from a verified one
+    forever. The marker is what makes the ambiguity temporary.
     """
     observed = verify_embedding_model(settings, context=context)
+    if stored_digest is None and settings.digest_enforcement_from:
+        raise ModelIdentityError(
+            f"A stored point carries no embedding-model digest at {context}, but "
+            f"digest enforcement has been active since "
+            f"{settings.digest_enforcement_from}.",
+            detail=(
+                "Every point should have been rewritten by the phase 2.1 reindex. "
+                "This one was not, so its vector cannot be attributed to any model. "
+                "Re-run eval/../reindex, or clear DIGEST_ENFORCEMENT_FROM if the "
+                "reindex is known to be incomplete."
+            ),
+        )
     if stored_digest is None or observed is None:
         return observed
     if stored_digest != observed:

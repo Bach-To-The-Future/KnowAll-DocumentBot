@@ -10,6 +10,7 @@ import uuid
 from core.config import Settings
 from core.exceptions import ExtractionError, InvalidRequestError
 from core.interfaces import CacheStore, ChunkLike, DenseEmbedder, JobStore, VectorStore
+from core.model_identity import verify_embedding_model
 from integrations.object_storage import MinIOObjectStorage
 from models.schemas import VectorRecord
 from services.query import CORPUS_VERSION_KEY
@@ -132,6 +133,11 @@ class IngestionService:
                 f"Split the document or raise MAX_CHUNKS_PER_DOCUMENT."
             )
 
+        # Resolved once per document, not per batch: one /api/tags call, and a
+        # model swapped mid-document would be caught on the next one rather
+        # than producing a document whose chunks disagree with each other.
+        embed_digest = verify_embedding_model(self._settings, context="ingest")
+
         batch_size = self._settings.ingest_batch_size
         embedded = 0
         for start in range(0, total_chunks, batch_size):
@@ -142,6 +148,12 @@ class IngestionService:
             for offset, node in enumerate(batch):
                 node.metadata["chunk_seq"] = start + offset
                 node.metadata["etag"] = etag
+                # Finding #2 / phase 2.1: every point records which embedding
+                # model produced its vector. Without this, a republished tag
+                # leaves a collection silently mixing vectors from two models
+                # and nothing downstream can tell.
+                node.metadata["embed_model"] = self._settings.embed_model
+                node.metadata["embed_model_digest"] = embed_digest or "unknown"
 
             records = self._embed_chunks(batch)
             if records:
