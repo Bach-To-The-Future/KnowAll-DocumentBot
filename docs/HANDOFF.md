@@ -38,6 +38,76 @@ such:
 
 ---
 
+## 1b. On this model, grounding cannot be enforced
+
+**This is a deployment property, not a bug awaiting a fix.**
+
+Three measurements were taken against `llama3.2:1b`. They are not three
+mechanism failures. They are **one property of the model, measured three ways:
+it cannot be relied on for instruction-following that is not answering the
+question.**
+
+| measurement | result |
+|---|---|
+| System-prompt rule 3 ("reply exactly …" when the context lacks the answer) | **0 of 4** near-miss unanswerables declined (F31) |
+| Any binary-verdict framing (P-3 D3, Control 2) | **"NO" is a fixed token, not a decision** — it answered NO to *"The sky is blue."* against the passage *"The sky is blue."*, and still answered NO when the labels were inverted |
+| A structured output contract (P-3 D6 control) | adding one rule requiring a quote block dropped answered questions **13/15 → 2/15** |
+
+The model reads passages correctly — it answers open questions accurately from
+context (D3 Control 3, and 13/15 under the base prompt). What it will not do is
+follow an instruction *about* its own output.
+
+> **That forecloses the entire category of prompt-level grounding.** Every
+> variant — a differently-worded rule 3, a different verdict vocabulary, a
+> looser output format — is the same bet on the same property, and the property
+> has been measured three times. Do not spend another cycle on a fourth
+> variant.
+
+Appendix B's ban on upgrading the generator was right, and it did its job: it
+stopped the model being used as an escape hatch **before the constraint was
+understood**. The constraint is now demonstrated, and it *is* the model.
+
+### The decision this leaves — a maintainer decision, with evidence attached
+
+1. **Accept documented ungrounded output.** Cheapest. The system will assert
+   unsupported claims with citations attached, at a measured rate of 8 of 10
+   unanswerable questions leaking through retrieval and 0 of 4 near-misses
+   caught by generation. Requires saying so to users.
+2. **Spend on D2 — an external entailment model.** The only remaining candidate
+   that attacks the benchmark inversion. Three unmeasured risks: a small NLI
+   model handling French, handling passages of this length, and fitting
+   alongside embedder + reranker + generator in a 3GiB container. Plus an R5
+   new-runtime-model decision.
+3. **Revisit the generator.** Now a considered choice rather than an escape
+   hatch, because the constraint has been isolated to instruction-following
+   rather than assumed.
+
+`require_support_quotes` (P-3 D1+D6) is implemented, correct, unit-tested and
+**shipped off**. It would work against a generator that can satisfy its output
+contract, so option 3 makes it viable with no code change.
+
+---
+
+## 1c. Standing rule, earned four times over
+
+> **A component test of a checker is not evidence the checked-for thing
+> occurs.** Every guard needs a measurement against real pipeline output, not
+> constructed fixtures.
+
+Four instances in this engagement:
+
+1. `verify_model_pins.py` asserted the pinned snapshot *existed* — which
+   `snapshot_download` guarantees on its own.
+2. The F24 live test set the env var in the shell; compose never passed it to
+   the container, so the "passing" test exercised nothing.
+3. F28's rewrite guard checked emptiness and length but not content, and passed
+   a fluent rewrite about a different subject.
+4. P-3's 17 grounding tests were **green while the mechanism measured 0/15** —
+   they fed well-formed SUPPORT blocks to the parser and never asked whether the
+   generator could produce one.
+
+---
+
 ## 2. What is measured, what is assumed
 
 ### Measured, with evidence in the log
@@ -105,7 +175,17 @@ Phase 1 exits **on tier B**, by decision, because tier A is not landing.
 
 ---
 
-## 5. Open findings
+## 5. Open questions for the maintainer
+
+| # | question | evidence |
+|---|---|---|
+| 1 | **Grounding on a 1B generator** — accept documented ungrounded output, spend on D2's entailment model, or revisit the generator? | §1b. Three measurements; P-3 in `REMEDIATION_LOG.md` |
+| 2 | **Tier A** — nothing that needs real-document composition can be settled without it: absolute threshold values, headline baseline credibility, real FR/OCR/table coverage. | §1, Phase 1A |
+| 3 | **D2's three unmeasured risks** — small NLI model on French, at this passage length, in a 3GiB container. Filed, not closed. | P-3 |
+
+---
+
+## 6. Open findings
 
 | # | Sev | State |
 |---|-----|-------|
@@ -122,7 +202,7 @@ is.
 
 ---
 
-## 6. Rules that hold across sessions
+## 7. Rules that hold across sessions
 
 - **Baselines.** `api_image_digest` is the authoritative identity of the code
   that ran. `git_sha` is the repo pointer at launch and can run ahead of the
@@ -143,7 +223,7 @@ is.
 
 ---
 
-## 7. Things that looked like they worked and did not
+## 8. Things that looked like they worked and did not
 
 Recorded because each cost real time and each was caught only by testing the
 check itself rather than the thing it checks.

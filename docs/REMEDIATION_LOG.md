@@ -71,6 +71,7 @@ Verdict key: **CONFIRMED** · **ALREADY FIXED** · **INCORRECT — actual state 
 | **30** | P2 | `_expand_context()` runs AFTER the score floor, so enrichment can never influence the discard decision | `retrieval.py:182` floor vs `:188` expand | **PINNED, not fixed** (`414de43`) — the fix IS P-2 candidate C1 |
 | **31** | **P1** | A cross-encoder scores TOPICAL RELEVANCE, not ANSWER PRESENCE. Near-miss unanswerable queries score 0.70-0.997 — higher than most correct answers — so no absolute score bar can separate "about your question" from "answers your question". The GENERATOR does not catch them either: 0 of 4, two fabrications with citations and two degenerate outputs | C3 run scores 0.6986 / 0.9557 / 0.9568 / 0.9968; full-mode generator test declined on 2/10, both being entries where retrieval returned nothing | **OPEN, P1 confirmed** — converges with #5 |
 | **32** | P2 | Degenerate generation: the model emits citation markers and nothing else (`[1] [1][3]`), which is neither an answer nor an abstention and reaches the user as an empty answer bubble | F31 generator test: 2 of 4 near-misses | **OPEN** — fix in 2.4 alongside finding #5's citation verification |
+| **33** | P2 | The abstention/concision rules cost real answers. Same 15 answerable questions: stripped 2-rule prompt answered **15/15**, the shipped 4-rule prompt **12/15** | ceiling control 2026-08-05 | **OPEN, FILED NOT FIXED** — changing the generation prompt needs R5 approval |
 
 ## 0.3 Finding 15 — correction
 
@@ -2458,4 +2459,53 @@ Phase 3 or post-handoff, as directed. The measurement that would settle it:
 
 Three unmeasured risks plus an R5 new-model decision. **If tier A lands, real
 bilingual documents are exactly what would test the first two.**
+
+## [P-3 follow-up] Is the four-rule prompt already near the ceiling? YES — F33
+Status: MEASURED and FILED. Prompt NOT changed — R5.
+
+Rule 5 collapsing answers 13/15 -> 2/15 was a very large effect for one added
+rule, so the maintainer asked whether the *existing* prompt is already costing
+answers. Same 15 positives, same passages, same model; the only variable is
+which rules are present.
+
+    STRIPPED (rules 1-2 only)        answered 15/15   abstained  0/15
+    SHIPPED  (rules 1-4)             answered 12/15   abstained  3/15
+    WITH RULE 5 (rules 1-5)          answered  2/15   abstained 13/15
+
+**The abstention and concision rules cost three answers** on questions the
+corpus demonstrably answers:
+
+    "How often are parking permits reissued?"        b12 states it verbatim
+    "What is happening in the lobby?"                b12 states it verbatim
+    "How long are records kept and who signs off
+     on destroying them?"                            two claims, one passage
+
+Filed as **finding #33 (P2)**. Not fixed: the generation prompt is R5
+territory, and the approval given covered only D1's rule 5.
+
+### Three caveats that bound the claim
+
+1. **Cannot attribute to rule 3 vs rule 4.** The stripped prompt dropped BOTH
+   the abstention rule and the concision rule. Isolating them needs two more
+   runs, which is cheap and worth doing before anyone edits the prompt.
+2. **Single sample on a nondeterministic model.** The base prompt scored 13/15
+   in the rule-5 control an hour earlier and 12/15 here. The model produces 3-5
+   distinct outputs per input at `temperature=0.1`, so the 3-answer gap carries
+   at least ±1 of noise. The *direction* is consistent; the magnitude is not
+   pinned.
+3. **n=15**, hand-authored, English-dominant.
+
+### What it does settle
+
+The rule-5 collapse is **specific to the structured-output contract**, not to
+prompt length or rule count. Going 2 rules -> 4 rules costs 3 answers; going
+4 rules -> 5 rules costs 10 more. That is not a linear degradation, and it
+supports the handoff's framing: the model tolerates instructions about *what to
+answer* and fails on instructions about *how to shape output*.
+
+It also means the system carries a real, measured trade today: rule 3 exists to
+make the model abstain when context is missing, and F31 measured that it does
+not do that (0/4). So rule 3 is currently paying a cost of ~3 answers in 15
+while delivering none of its intended benefit. **That framing is the finding**,
+and it is a maintainer decision, not a cleanup.
 
