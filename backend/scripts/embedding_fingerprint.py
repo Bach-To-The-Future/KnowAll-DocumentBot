@@ -91,7 +91,7 @@ def main() -> int:
     with open(FINGERPRINT, encoding="utf-8") as fh:
         old = json.load(fh)
 
-    print(f"           BEFORE                     AFTER")
+    print("           BEFORE                     AFTER")
     print(f"digest     {str(old['embed_model_digest'])[:24]}   {str(digest)[:24]}")
     print(f"dim        {old['embed_dim']:<26} {len(vector)}")
 

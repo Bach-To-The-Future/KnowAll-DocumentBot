@@ -188,7 +188,7 @@ def main() -> int:
                          ("shipped ", SYSTEM_PROMPT),
                          ("rule5   ", SYSTEM_PROMPT_WITH_SUPPORT)):
         answered = 0
-        for lang, question, passage, _ in POSITIVES:
+        for _lang, question, passage, _ in POSITIVES:
             out, dt = timed_complete(container, system, ctx(passage, question))
             latencies.append(dt)
             if NO_ANSWER_MESSAGE.rstrip(".").lower() not in out.lower():
