@@ -48,6 +48,11 @@ class ExtractCSV(BaseExtractor):
         self.logger.info(f"Extracting and chunking: {file_path}")
         source = os.path.basename(file_path)
         ext = os.path.splitext(file_path)[-1][1:].lower()
+        # Finding #29: every row-group of one CSV is part of the same table, but
+        # nothing said so. Without a section title these chunks fell to the
+        # plain +/-1 window in _expand_with_sections, and the reranker was
+        # handed a bare row-group with no statement of what table it came from.
+        section_title = f"Table: {os.path.splitext(source)[0]}"
 
         encoding = self.detect_encoding(file_path)
         delimiter = self.detect_delimiter(file_path, encoding)
@@ -76,6 +81,7 @@ class ExtractCSV(BaseExtractor):
                         table_id=f"rows_{first_row}_{last_row}",
                         headers=block.columns.tolist(),
                         row_range=f"{first_row}-{last_row}",
+                        section_title=section_title,
                     )
                 )
                 if doc:

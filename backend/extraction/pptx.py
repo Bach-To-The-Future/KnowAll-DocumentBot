@@ -30,13 +30,23 @@ class ExtractPPTX(BaseExtractor):
                         slide_text.append(shape.text.strip())
                 if slide_text:
                     text = "\n".join(slide_text)
+                    # Finding #29: a slide that overflows into several chunks
+                    # had nothing tying those chunks together, and the reranker
+                    # was handed a fragment with no statement of which slide it
+                    # came from. The first non-empty line is the slide title in
+                    # practice; fall back to the number so the field is never
+                    # absent.
+                    title = slide_text[0].splitlines()[0].strip()
+                    section_title = (f"Slide {slide_num}: {title}" if title
+                                     else f"Slide {slide_num}")
                     doc = self.create_document(text, metadata=generate_metadata(
                         source=source,
                         index=slide_num,
                         max_index=len(prs.slides),
                         file_format=ext,
                         page_number=slide_num,
-                        content_type="text"
+                        content_type="text",
+                        section_title=section_title,
                     ))
                     if doc:
                         nodes = self.chunk_document(doc)

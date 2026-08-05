@@ -46,6 +46,12 @@ class ExtractXLSX(BaseExtractor):
                         file_format=ext,
                         content_type="table",
                         sheet_name=sheet_name,
+                        # Finding #29: the sheet name was recorded but never as
+                        # the SECTION, so row-groups of one sheet were not
+                        # related to each other. The chunk text already leads
+                        # with "Sheet: <name>", so the prefix stripper in
+                        # _expand_with_sections removes the repeat cleanly.
+                        section_title=f"Sheet: {sheet_name}",
                         headers=df.columns.tolist(),
                         row_range=f"{start}-{last_row}",
                     )
