@@ -2509,3 +2509,62 @@ not do that (0/4). So rule 3 is currently paying a cost of ~3 answers in 15
 while delivering none of its intended benefit. **That framing is the finding**,
 and it is a maintainer decision, not a cleanup.
 
+## [R5] Ollama runtime upgraded 0.9.3 -> 0.32.5 — embedding vectors survived
+Status: DONE · pinned BY DIGEST · runbook `docs/RUNBOOK-ollama-upgrade.md`
+
+Approved as a second R5 item after the generation-model upgrade turned out to
+be blocked behind it: `qwen3.5:2b` and `qwen3.5:4b` resolve in the registry
+(200; weights 2.74 GB and 3.39 GB; config digests recorded) but `ollama pull`
+returns **HTTP 412 "requires a newer version of Ollama"** on 0.9.3. Reported
+rather than substituted — an adjacent model that happens to pull on 0.9.3 would
+answer a different question than the campaign exists to settle.
+
+    old  ollama/ollama@sha256:45008241d61056449dd4f20cebf64bfa5a2168b0c078ecf34aa2779760502c2f  (0.9.3)
+    new  ollama/ollama@sha256:4dea9fb511947e24a84237bb636b0203abcb2ff0d3fbc7b4ff865deb91362131  (0.32.5)
+
+Pinned by digest, not tag, per finding #25.
+
+### Pre-flight, in the order directed, all before the runtime moved
+
+1. Qdrant snapshot with **verified restore** — 376 points out, 376 back into a
+   throwaway collection, throwaway deleted.
+2. `nomic-embed-text` digest recorded to a committed file.
+3. A fixed probe text's 768-dim vector captured and committed
+   (`eval/baselines/embedding-fingerprint.json`).
+4. Rollback written into the runbook **first**, with the old runtime digest and
+   the snapshot name.
+
+`--verify` was also **self-tested before the upgrade** (deviation `0.000e+00`,
+byte-exact), so a bug in the check could not be discovered at the moment of
+needing it. That is handoff §1c applied to my own tooling.
+
+### The result, and why the tolerance mattered
+
+    digest      0a109f422b47…  ->  0a109f422b47…     UNCHANGED
+    dim         768            ->  768               unchanged
+    byte-exact  False
+    cosine      0.999999870819
+    deviation   1.292e-07        (tolerance 1e-05)
+
+**The digest did not move, so the runbook says proceed.** But the vectors are
+**not bit-identical** — and without the explicit tolerance the maintainer
+required, `byte-exact: False` would have read as alarming. With it, the number
+places itself: `1.292e-07` sits squarely in the floating-point/batching
+population (~1e-7), two orders below the 1e-5 threshold and nowhere near the
+re-quantization population (~1e-3+).
+
+### What that non-zero deviation actually tells us — worth recording
+
+Identical weights, identical digest, and the embedding function still produces
+marginally different floats under a different runtime. So:
+
+> **Embedding output is bit-stable WITHIN a runtime version, not ACROSS one.**
+> The retrieval-mode determinism measured earlier (0.0 spread over six passes)
+> holds for a fixed container, which is what CI compares. It would not survive
+> a runtime bump, and a future baseline diff across one should expect
+> ~1e-7-scale vector noise rather than treating it as drift.
+
+That is below any threshold in the system and changes nothing today. It is
+recorded because the next person to see `byte-exact: False` deserves to know it
+was measured and dismissed on evidence rather than overlooked.
+

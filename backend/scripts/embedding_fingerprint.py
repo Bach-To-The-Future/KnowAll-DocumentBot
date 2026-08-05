@@ -38,6 +38,18 @@ from integrations.embeddings import build_embedder  # noqa: E402
 PROBE = ("Records are retained for seven years from the date of creation. "
          "Disposal requires written authorisation from the records officer.")
 
+# Explicit tolerance, not an eyeball. The two populations are orders apart:
+#
+#   ~1e-7 and below   floating-point and batching nondeterminism on weights
+#                     that are genuinely identical
+#   ~1e-3 and above   re-quantization — a different function
+#
+# 1e-5 sits between them, roughly log-midway, so it separates the two without
+# sitting near either. The measured deviation is ALWAYS reported, whichever
+# side it falls, because a value landing somewhere unexpected is itself the
+# information.
+COSINE_TOLERANCE = 1e-5
+
 # Overridable because /app is read-only to the non-root runtime user; the
 # capture is written somewhere writable and copied into the repo from outside.
 FINGERPRINT = os.getenv(
@@ -101,13 +113,19 @@ def main() -> int:
         return 1
 
     similarity = cosine(old["vector"], vector)
+    deviation = 1.0 - similarity
     exact = old["vector"] == vector
     print(f"cosine     {similarity:.12f}")
+    print(f"deviation  {deviation:.3e}   (tolerance {COSINE_TOLERANCE:.0e})")
     print(f"byte-exact {exact}")
 
     print()
-    if exact or similarity > 0.999999:
-        print("VECTORS UNCHANGED.")
+    if exact or deviation <= COSINE_TOLERANCE:
+        print(f"VECTORS UNCHANGED — deviation {deviation:.3e} is within "
+              f"{COSINE_TOLERANCE:.0e}.")
+        if deviation > 1e-6:
+            print("  NOTE: larger than pure floating-point noise (~1e-7) though "
+                  "still\n  inside tolerance. Worth a second look if it grows.")
         if old["embed_model_digest"] != digest:
             print("  The digest moved but the vectors did not: a republish carrying")
             print("  the same weights. Update EXPECTED_EMBED_MODEL_DIGEST to the new")
@@ -116,8 +134,11 @@ def main() -> int:
             print("  Digest and vectors both unchanged. Nothing to do.")
         return 0
 
-    print("VECTORS DIVERGED — this is re-quantization, not a republish.")
-    print(f"  cosine {similarity:.6f} against the stored probe.")
+    print(f"VECTORS DIVERGED — deviation {deviation:.3e} exceeds "
+          f"{COSINE_TOLERANCE:.0e}.")
+    print(f"  cosine {similarity:.12f} against the stored probe.")
+    print("  That is the re-quantization population (~1e-3+), not the "
+          "floating-point one (~1e-7).")
     print("  Every vector in the collection was produced by a function that no")
     print("  longer exists. The collection is INVALIDATED: a reindex and fresh")
     print("  baselines are required, and that is a maintainer decision.")

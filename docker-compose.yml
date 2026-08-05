@@ -52,7 +52,13 @@ services:
 
   # --- Ollama LLM ---
   ollama:
-    image: ollama/ollama:0.9.3
+    # Pinned BY DIGEST, not by tag (finding #25): a tag is republished, a
+    # digest is not. Upgraded 0.9.3 -> 0.32.5 as an R5 item because
+    # qwen3.5:* resolve in the registry but return HTTP 412 on 0.9.3
+    # ("requires a newer version of Ollama").
+    # Rollback digest and procedure: docs/RUNBOOK-ollama-upgrade.md
+    #   ollama/ollama:0.32.5 as of 2026-08-05
+    image: ollama/ollama@sha256:4dea9fb511947e24a84237bb636b0203abcb2ff0d3fbc7b4ff865deb91362131
     container_name: ollama
     restart: unless-stopped
     deploy:
