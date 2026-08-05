@@ -132,6 +132,9 @@ def validate_golden(entries: list[dict[str, Any]]) -> list[str]:
     problems: list[str] = []
     for i, e in enumerate(entries):
         where = f"entry {i} ({str(e.get('question', '<no question>'))[:50]!r})"
+        if e.get("full_mode_only") and not e.get("history"):
+            problems.append(f"{where}: full_mode_only requires history — without it "
+                            f"there is nothing for full mode to do differently")
         for field in ("question", "language", "answerable", "tier", "category"):
             if field not in e:
                 problems.append(f"{where}: missing required field {field!r}")
@@ -458,6 +461,19 @@ def main() -> int:
         gate_full_mode(settings)
 
     entries = load_golden(args.golden)
+    # Entries that REQUIRE history-based rewriting cannot be scored in
+    # retrieval mode: that mode sends the question to the retriever verbatim,
+    # so "And the disposal rule?" fails by construction. Counting those as
+    # false abstentions makes the metric permanently report a defect that is
+    # not one. They are still exercised in full mode.
+    skipped_full_only = 0
+    if args.mode == RETRIEVAL_MODE:
+        before = len(entries)
+        entries = [e for e in entries if not e.get("full_mode_only")]
+        skipped_full_only = before - len(entries)
+        if skipped_full_only:
+            print(f"retrieval mode: skipping {skipped_full_only} full-mode-only "
+                  f"entries (they require query rewriting)")
     if args.tier:
         entries = [e for e in entries if e["tier"] == args.tier]
         if not entries:
@@ -480,6 +496,8 @@ def main() -> int:
     baseline: dict[str, Any] = {
         "eval_mode": args.mode,
         "k": k,
+        "n_entries": len(entries),
+        "skipped_full_mode_only": skipped_full_only,
         "provenance": provenance.build(
             settings,
             corpus_manifest_sha256=corpus_verify.manifest_hash(),

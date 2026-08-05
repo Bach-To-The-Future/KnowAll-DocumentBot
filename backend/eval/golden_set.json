@@ -10,7 +10,8 @@
     "answer_snippet": "VERBATIM text from the source document that answers the question. Required for answerable entries. It defines the lexical-overlap slice, so it must be copied from the document, never from retrieval output",
     "history": "optional prior turns [{question, answer}] seeded into session memory in full mode; drives the needs_rewrite() branch",
     "expects_rewrite": "the needs_rewrite() verdict this entry must produce. A mismatch FAILS the eval run — that is how a widened anaphora regex is caught before it silently rewrites standalone questions",
-    "note": "optional context for humans"
+    "note": "optional context for humans",
+    "full_mode_only": "true = this entry REQUIRES history-based query rewriting, which only full mode performs. Retrieval mode sends the question to the retriever verbatim, so failing there is the mode behaving correctly, not a defect. Excluded from retrieval-mode metrics; still reported in its category slice."
   },
   "entries": [
     {
@@ -275,7 +276,8 @@
         "records officer"
       ],
       "answer_snippet": "Disposal requires written authorisation from the records officer.",
-      "note": "BRANCH 2 - 4 words with history: short-circuit fires before the regex"
+      "note": "BRANCH 2 - 4 words with history: short-circuit fires before the regex",
+      "full_mode_only": true
     },
     {
       "question": "Et le stock de securite ?",
@@ -297,7 +299,8 @@
         "15"
       ],
       "answer_snippet": "safety_stock,15",
-      "note": "BRANCH 2 (fr) - 5 words with history: short-circuit"
+      "note": "BRANCH 2 (fr) - 5 words with history: short-circuit",
+      "full_mode_only": true
     },
     {
       "question": "How long does it take before that reaches the duty supervisor?",
@@ -319,7 +322,8 @@
         "72 hours"
       ],
       "answer_snippet": "Unresolved incidents escalate to the duty supervisor after 72 hours.",
-      "note": "BRANCH 3 - long, history present, 'it'/'that' hit the regex"
+      "note": "BRANCH 3 - long, history present, 'it'/'that' hit the regex",
+      "full_mode_only": true
     },
     {
       "question": "Est-ce que cette limite vaut aussi pour les demandes tardives ?",
@@ -341,7 +345,8 @@
         "75000"
       ],
       "answer_snippet": "Le plafond de la subvention est de 75000 dollars.",
-      "note": "BRANCH 3 (fr) - long, history present, 'cette' hits the regex"
+      "note": "BRANCH 3 (fr) - long, history present, 'cette' hits the regex",
+      "full_mode_only": true
     },
     {
       "question": "What stock level triggers a replenishment order for the Halifax warehouse?",
@@ -363,7 +368,8 @@
         "25"
       ],
       "answer_snippet": "reorder_point,25",
-      "note": "BRANCH 4 (NEGATIVE, the important one) - long, history present, no anaphor: must NOT rewrite. A widened regex over-triggers here first."
+      "note": "BRANCH 4 (NEGATIVE, the important one) - long, history present, no anaphor: must NOT rewrite. A widened regex over-triggers here first.",
+      "full_mode_only": true
     },
     {
       "question": "Quelle est la periode de preavis prevue au contrat CT-9001 ?",
@@ -385,7 +391,8 @@
         "95 days"
       ],
       "answer_snippet": "The termination notice period is 95 days.",
-      "note": "BRANCH 4 (fr NEGATIVE) - also pins the word-boundary behaviour: 'Quelle' contains 'elle' and must not match \\belle\\b."
+      "note": "BRANCH 4 (fr NEGATIVE) - also pins the word-boundary behaviour: 'Quelle' contains 'elle' and must not match \\belle\\b.",
+      "full_mode_only": true
     },
     {
       "question": "Combien de temps faut-il pour accuser reception d'un billet prioritaire ?",
@@ -407,7 +414,8 @@
         "15 minutes"
       ],
       "answer_snippet": "Priority one tickets are acknowledged within 15 minutes.",
-      "note": "BRANCH 3 (fr) - 'faut-il' matches \\bil\\b across the hyphen. Recorded because it is a true positive that reads like a false one."
+      "note": "BRANCH 3 (fr) - 'faut-il' matches \\bil\\b across the hyphen. Recorded because it is a true positive that reads like a false one.",
+      "full_mode_only": true
     },
     {
       "question": "How many parking permits were issued last September?",

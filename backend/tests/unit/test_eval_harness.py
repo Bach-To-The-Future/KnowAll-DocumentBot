@@ -294,3 +294,28 @@ def test_unresolved_provenance_fields_are_detectable() -> None:
             "reranker_revision": "unpinned", "embed_model": "nomic"}
     unresolved = [k for k, v in prov.items() if v in ("unknown", "unpinned")]
     assert sorted(unresolved) == ["api_image_digest", "reranker_revision"]
+
+
+def test_full_mode_only_entries_all_carry_history() -> None:
+    """An entry marked full-mode-only but carrying no history is a mistake: it
+    would be silently dropped from retrieval mode for no reason."""
+    for e in GOLDEN:
+        if e.get("full_mode_only"):
+            assert e.get("history"), e["question"]
+
+
+def test_the_loader_rejects_full_mode_only_without_history() -> None:
+    entry = dict(ANSWERABLE[0], full_mode_only=True)
+    entry.pop("history", None)
+    assert any("full_mode_only requires history" in p
+               for p in validate_golden([entry]))
+
+
+def test_every_history_bearing_conversational_entry_is_full_mode_only() -> None:
+    """Retrieval mode cannot rewrite, so any entry needing rewriting fails there
+    by construction. Missing the tag puts a permanent false defect in
+    false_abstention_rate."""
+    untagged = [e["question"] for e in GOLDEN
+                if e["category"] == "conversational" and e.get("history")
+                and not e.get("full_mode_only")]
+    assert untagged == []
