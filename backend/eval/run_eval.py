@@ -496,6 +496,17 @@ def main() -> int:
     if args.runs > 1:
         baseline["variance"] = variance_report(per_run_results)
 
+    # A baseline recorded without the image id cannot be trusted to describe
+    # the code that ran -- git_sha is the repo pointer and can run ahead of the
+    # image, or behind it when files were copied in. Say so at record time, not
+    # months later when someone diffs against it.
+    unresolved = [k_ for k_, v in baseline["provenance"].items()
+                  if v in ("unknown", "unpinned")]
+    if unresolved:
+        print(f"\nWARNING: DIAGNOSTIC ONLY — unresolved provenance: "
+              f"{', '.join(sorted(unresolved))}")
+        print("  This file is not a reference baseline. See eval/baselines/README.md.")
+
     print(f"\n=== eval summary ({args.mode} mode, k={k}) ===")
     for tier, m in baseline["results"].items():
         print(f"[{tier}]  " + "  ".join(

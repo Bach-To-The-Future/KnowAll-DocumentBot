@@ -1420,3 +1420,71 @@ language.
 **No LLM seed was set**, as directed: a seed would make the eval reproducible
 while hiding the nondeterminism real users get — the opposite of what this
 harness is for.
+
+
+## [F29] Before/after measured — ZERO change, and that was predictable
+Status: measured, and the result is about the instrument as much as the change
+
+Re-ingested the corpus with the new section metadata and re-ran retrieval mode,
+two passes, against the committed baseline:
+
+    verdict: COMPARABLE_WITH_COSMETIC_DRIFT
+
+    [tier_b]
+      ^ recall_at_fetch           1.000 ->  1.000  (+0.000)
+      ^ hit_at_k                  0.318 ->  0.318  (+0.000)
+      ^ mrr_at_k                  0.318 ->  0.318  (+0.000)
+      ^ correct_abstention_rate   1.000 ->  1.000  (+0.000)
+      v false_abstention_rate     0.682 ->  0.682  (+0.000)
+
+Re-ingest produced **18 chunks from 13 documents**, identical to before, which
+confirms no chunking moved. Every metric identical to three decimals.
+
+### This is not evidence that F29 helped, and not evidence that it is safe
+
+It is the **sensitivity finding applied to my own change**, and it was
+predictable from the mechanism:
+
+1. Finding #27 pins **15 of 25** entries at a score that cannot move.
+2. Every one of the 10 live entries returns **exactly one** chunk.
+3. F29's only retrieval-path effect is on **context expansion** — and by
+   finding #30 expansion runs *after* the floor.
+
+So a chunk the floor discards never reaches expansion, and a chunk that
+survives gets expanded either way (previously via the ±1 window, now via its
+section). Expansion changes the chunk's *text*, not whether it is the right
+chunk, so `hit@k` cannot move. **F29 could not have registered on this
+instrument no matter what it did.**
+
+What IS proven about F29: five unit tests run the real extractors and assert
+the field is emitted, including a guard that no chunk from these three formats
+may lack it. That satisfies R2 for the change itself. The *retrieval* effect is
+unmeasurable today and is recorded as unmeasured rather than as neutral.
+
+Three findings are therefore entangled, and the order is forced:
+
+> **#27 must lift before #29 or #30 can be evaluated at all.** Until the floor
+> stops collapsing results to 0-or-1 items, the harness cannot distinguish a
+> retrieval improvement from a no-op.
+
+### The comparator caught my own sloppiness, which is the point of it
+
+    cosmetic drift (no expected retrieval effect):
+      git_sha:          56154fec... -> b6a6f00...
+      api_image_digest: sha256:0dd9f332... -> unknown
+
+`api_image_digest` went to `unknown` because this run used code copied into a
+running container rather than a rebuilt image, and I did not pass the image id.
+The recorded `git_sha` (`b6a6f00`) is also **wrong for the code that ran** — the
+container additionally held F29 (`64b9a35`) via `docker compose cp`. Exactly the
+git_sha-vs-image hazard documented earlier, committed by me, one session after
+documenting it.
+
+The after-run is therefore **not committed as a baseline**. It is a diagnostic
+comparison, recorded here.
+
+**Hardening, so the next person is told rather than expected to remember:**
+`run_eval.py` now prints a loud `WARNING: DIAGNOSTIC ONLY — unresolved
+provenance: <fields>` at record time whenever any provenance field is `unknown`
+or `unpinned`, naming them, and pointing at `baselines/README.md`. Previously
+that judgement lived only in a README nobody reads while running an eval.

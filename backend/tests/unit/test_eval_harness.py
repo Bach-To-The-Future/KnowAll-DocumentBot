@@ -285,3 +285,12 @@ def test_a_rewrite_rejected_as_drift_is_counted_and_named() -> None:
 def test_similarity_stats_are_absent_rather_than_zero_when_unmeasured() -> None:
     rw = summarize([_row()])["rewrite"]
     assert rw["similarity_min"] is None and rw["similarity_median"] is None
+
+
+def test_unresolved_provenance_fields_are_detectable() -> None:
+    """A baseline recorded without the image id cannot be trusted to describe
+    the code that ran. run_eval warns at record time on exactly this set."""
+    prov = {"git_sha": "abc", "api_image_digest": "unknown",
+            "reranker_revision": "unpinned", "embed_model": "nomic"}
+    unresolved = [k for k, v in prov.items() if v in ("unknown", "unpinned")]
+    assert sorted(unresolved) == ["api_image_digest", "reranker_revision"]
