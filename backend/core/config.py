@@ -86,6 +86,18 @@ class Settings(BaseSettings):
     # collection would be indistinguishable from a verified one forever.
     digest_enforcement_from: str | None = None
 
+    # Finding #32 / P-3 candidate D5 — malformed-generation guard.
+    #
+    # Minimum SUBSTANTIVE characters (citation markers stripped) for a
+    # generation to count as an answer. The model sometimes emits "[1] [1][3]"
+    # and nothing else: not an answer, not an abstention, and it passes every
+    # other check because it is non-empty, correctly sized and even cites.
+    # Below this it is treated as a FAILED generation and becomes the
+    # abstention message.
+    #
+    # REVERSIBLE: 0 disables the guard and reproduces pre-2.4 behaviour exactly.
+    min_answer_chars: int = 20
+
     # Finding #28 — semantic-drift guard on query rewrite. A rewrite whose
     # cosine similarity to the original question falls below this is discarded
     # and the original is used. Deliberately LOW: this is a safety net against

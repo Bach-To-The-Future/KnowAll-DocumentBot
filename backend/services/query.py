@@ -63,6 +63,22 @@ _ANAPHORA_RE = re.compile(
 )
 
 
+# Citation markers the model emits: [1], [2][3], [1] [4].
+_CITATION_RE = re.compile(r"\[\s*\d+\s*\]")
+
+
+def substantive_text(answer: str) -> str:
+    """What is left after stripping citation markers and punctuation.
+
+    Finding #32: the generator sometimes emits "[1] [1][3]" and nothing else —
+    citation markers with no prose. That is neither an answer nor an
+    abstention, and it passes every pre-existing check: non-empty, correctly
+    sized, and it even contains citations. It reaches the user as an empty
+    answer bubble.
+    """
+    return _CITATION_RE.sub("", answer).strip(" \t\n\r.,;:—-[]()")
+
+
 @dataclass(frozen=True)
 class RewriteResult:
     """What the rewrite did, and why — so a rejection is visible in the trace
@@ -342,6 +358,29 @@ class QueryService:
         )
         log_event("rag_query", answer_chars=len(answer), **prepared.trace)
 
+    def _reject_if_malformed(self, answer: str, prepared: PreparedQuery) -> str:
+        """Finding #32 (P-3 candidate D5). A generation carrying no substantive
+        content is a FAILED generation, not an answer and not an abstention.
+
+        Reversible: min_answer_chars = 0 disables the guard entirely and
+        reproduces the pre-2.4 behaviour, which a test pins.
+        """
+        floor = self._settings.min_answer_chars
+        if floor <= 0 or not answer:
+            return answer
+        if answer == NO_ANSWER_MESSAGE:
+            return answer
+        remainder = substantive_text(answer)
+        if len(remainder) >= floor:
+            return answer
+        logger.warning(
+            f"Malformed generation REJECTED (#32): {len(remainder)} substantive "
+            f"chars below {floor}. raw={answer[:120]!r}"
+        )
+        prepared.trace["malformed_generation"] = True
+        prepared.trace["malformed_raw"] = answer
+        return NO_ANSWER_MESSAGE
+
     async def answer_prepared(self, prepared: PreparedQuery) -> dict[str, Any]:
         """Non-streaming path over an already-prepared query.
 
@@ -373,6 +412,7 @@ class QueryService:
                 prompt=prepared.prompt, system_prompt=SYSTEM_PROMPT
             )).strip()
 
+        answer = self._reject_if_malformed(answer, prepared)
         if prepared.cache_key and answer:
             self._cache_set(prepared.cache_key, answer, prepared.citations)
         await run_in_threadpool(self._finish, prepared, answer)
@@ -422,6 +462,15 @@ class QueryService:
                 # Reached only when generation completed: never cache a
                 # partial answer from a disconnected stream.
                 answer = "".join(answer_parts).strip()
+                # Finding #32: the stream has already delivered the tokens, so
+                # the guard cannot un-send them. It emits a correction event so
+                # the client replaces an empty bubble with the abstention, and
+                # keeps the malformed text out of the cache and out of memory.
+                checked = self._reject_if_malformed(answer, prepared)
+                if checked != answer:
+                    answer_parts[:] = [checked]
+                    answer = checked
+                    yield json.dumps({"type": "replace", "text": checked}) + "\n"
                 if prepared.cache_key and answer:
                     self._cache_set(prepared.cache_key, answer, prepared.citations)
             yield json.dumps({"type": "done"}) + "\n"

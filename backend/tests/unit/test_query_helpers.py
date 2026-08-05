@@ -167,3 +167,62 @@ def test_llm_failure_still_falls_back_without_consulting_the_embedder():
 def test_empty_and_overlong_rewrites_keep_their_own_reasons():
     assert drift_service("").rewrite(ORIGINAL, HISTORY).reason == "empty"
     assert drift_service("x" * 1000).rewrite(ORIGINAL, HISTORY).reason == "too-long"
+
+
+# --- finding #32 / P-3 candidate D5: malformed-generation guard ---------------
+
+# Verbatim outputs observed from llama3.2:1b on the near-miss probes.
+OBSERVED_MALFORMED = ["[1] [1][3]", "[1] [2][3]"]
+
+
+@pytest.mark.parametrize("raw", OBSERVED_MALFORMED)
+def test_observed_citation_only_output_has_no_substantive_content(raw):
+    from services.query import substantive_text
+    assert substantive_text(raw) == ""
+
+
+def test_a_real_answer_survives_citation_stripping():
+    from services.query import substantive_text
+    assert "records officer" in substantive_text(
+        "According to [1], the records officer must authorise disposal."
+    )
+
+
+@pytest.mark.parametrize("raw", OBSERVED_MALFORMED)
+def test_malformed_generation_becomes_the_abstention_message(raw):
+    from services.query import NO_ANSWER_MESSAGE, PreparedQuery
+    service = make_service(FakeLLM())
+    prepared = PreparedQuery([], "", {}, None)
+    assert service._reject_if_malformed(raw, prepared) == NO_ANSWER_MESSAGE
+    # Recorded, not silently swallowed: the raw text is kept for forensics.
+    assert prepared.trace["malformed_generation"] is True
+    assert prepared.trace["malformed_raw"] == raw
+
+
+def test_the_guard_passes_a_normal_answer_through():
+    from services.query import PreparedQuery
+    service = make_service(FakeLLM())
+    answer = "According to [1], records are retained for seven years."
+    prepared = PreparedQuery([], "", {}, None)
+    assert service._reject_if_malformed(answer, prepared) == answer
+    assert "malformed_generation" not in prepared.trace
+
+
+def test_the_guard_never_rewrites_the_abstention_message():
+    from services.query import NO_ANSWER_MESSAGE, PreparedQuery
+    service = make_service(FakeLLM())
+    prepared = PreparedQuery([], "", {}, None)
+    assert service._reject_if_malformed(
+        NO_ANSWER_MESSAGE, prepared) == NO_ANSWER_MESSAGE
+    assert "malformed_generation" not in prepared.trace
+
+
+def test_the_guard_is_reversible_at_zero():
+    """P-3's standing requirement: a groundedness check that cannot be switched
+    off is one nobody can measure the cost of. min_answer_chars=0 reproduces
+    pre-2.4 behaviour exactly."""
+    from services.query import PreparedQuery
+    service = make_service(FakeLLM(), min_answer_chars=0)
+    prepared = PreparedQuery([], "", {}, None)
+    assert service._reject_if_malformed("[1] [1][3]", prepared) == "[1] [1][3]"
+    assert "malformed_generation" not in prepared.trace
