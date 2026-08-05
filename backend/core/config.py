@@ -101,9 +101,24 @@ class Settings(BaseSettings):
     # wrongly from it — the benchmark deadline-into-entitlement inversion
     # survives this. Candidate D2 (entailment) remains OPEN, not closed.
     #
-    # REVERSIBLE: false skips the check and drops the prompt rule, reproducing
-    # pre-2.4 behaviour exactly.
-    require_support_quotes: bool = True
+    # SHIPS OFF. MEASURED 2026-08-05 on llama3.2:1b: adding rule 5 collapsed
+    # generation. Same 15 answerable questions, same passages, only the prompt
+    # rule differing:
+    #
+    #     base prompt (4 rules)   answered 13/15   abstained  2/15
+    #     with rule 5             answered  2/15   abstained 13/15
+    #
+    # The model responded "I could not find this information in the provided
+    # documents." to questions whose passage states the answer verbatim. The
+    # SUPPORT requirement is a GENERATION REGRESSION on a 1B model, not a
+    # grounding mechanism. The verification code is correct and tested and
+    # would work against a model that can satisfy the output contract — this
+    # one cannot.
+    #
+    # Left in place, off, rather than deleted: it is the only mechanism P-3
+    # produced that survives its own unit tests, and a larger generator would
+    # make it viable without any code change.
+    require_support_quotes: bool = False
 
     # Finding #32 / P-3 candidate D5 — malformed-generation guard.
     #

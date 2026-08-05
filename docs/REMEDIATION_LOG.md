@@ -2363,3 +2363,99 @@ so D2 remains the only candidate that attacks that case head-on.
 **Not implementing D6.** P-3's discipline was to propose and let the maintainer
 decide, and D6 arrived after approval. Recorded for decision alongside D2.
 
+## [P-3 / D1+D6] Measured — it is a GENERATION REGRESSION, and it ships OFF
+Status: implemented, tested, **disabled by default** · commit `b523f9d`
+
+### Both directions, 15 positives / 5 negatives
+
+    EMISSION RATE   positives  3/15 emitted a quote
+                    negatives  2/5
+    MATCH RATE      positives  0/3      negatives  0/2
+    OUTCOME         positives kept 0/15      negatives kept 0/5
+    REASONS         positives {no-quotes: 11, quote-not-found: 3, no-citations: 1}
+
+Splitting emission from matching is what made this readable, exactly as
+directed: **emission is the failure, not matching.** Eleven of fifteen never
+produced a quote at all. An aggregate "0/15" would have looked like a strict
+checker rather than a generator that stopped working.
+
+### The raw output showed something worse than "did not quote"
+
+    Q  "How long are records retained?"
+       passage: "Records are retained for seven years from the date of creation."
+    A  "I could not find this information in the provided documents. [1]
+        SUPPORT:
+        [1] [1]"
+
+The model **abstained on questions it answers correctly without rule 5** —
+rule 3 firing on an answerable question, the opposite failure from F31.
+
+### Control: rule 5 CAUSED it
+
+Same 15 questions, same passages, same model. Only the prompt rule differs.
+
+    base prompt (4 rules)   answered 13/15   abstained  2/15
+    with rule 5             answered  2/15   abstained 13/15
+
+Thirteen questions flipped from answered to abstained. Base-prompt answers for
+those were correct and cited:
+
+    "According to [1], records are retained for seven years from the date of
+     creation, and disposal requires written authorisation..."
+    "According to [1], an incident must be reported within 24 hours of discovery."
+
+> **The SUPPORT requirement is a generation regression on a 1B model, not a
+> grounding mechanism.** Asking it to produce a structured second section
+> destroyed its ability to answer at all.
+
+### Shipped OFF, not deleted
+
+`require_support_quotes` now defaults to **false**, with a test asserting the
+default. The verification code is correct and passes 17 unit tests; it would
+work against a generator that can satisfy the output contract. Leaving it in
+place, off, costs nothing and makes it viable on a larger model without a code
+change. The maintainer's standing reversibility requirement is what made this a
+one-line default flip rather than a revert.
+
+### My unit tests passed and proved nothing about this
+
+All 17 grounding tests were green when the mechanism was measured at 0/15.
+They feed **well-formed SUPPORT blocks to the parser** — they verify the
+checker, never the generator's ability to produce input for it.
+
+That is the same class of gap as finding #28: a guard validated against the
+shape it expects rather than the input it will actually receive. I wrote the
+F28 note about exactly this and then built it again one commit later. The
+lesson that generalises: **a component test of a checker is not evidence the
+checked-for thing occurs.**
+
+### Where P-3 now stands
+
+    D1+D6   implemented, correct, DISABLED — generation regression on 1B
+    D2      OPEN — the only remaining candidate
+    D3      dead: fixed "NO" token under any binary-verdict framing
+    D4      dead: shares D3's framing, settled without its own test
+    D5      LANDED (`7e26d56`) — malformed-generation guard, on by default
+
+> **Finding #5 has no viable fix on llama3.2:1b using prompt-level or
+> self-check mechanisms.** Three independent measurements now say so: the
+> generator will not apply rule 3 (F31), cannot be steered into a verdict token
+> (D3 control), and cannot satisfy a structured output contract without
+> collapsing (D6 control). What remains is D2 — an external entailment model —
+> or a larger generator, which Appendix B forbids as a substitute for fixing
+> grounding.
+
+That is a real constraint on the system as configured, and it belongs in the
+handoff rather than in a backlog.
+
+### D2's settling measurement — FILED, NOT CLOSED
+
+Phase 3 or post-handoff, as directed. The measurement that would settle it:
+
+- a small NLI model on the **French** benchmark inversion,
+- at **this passage length**,
+- fitting alongside embedder + reranker + generator in a **3GiB** container.
+
+Three unmeasured risks plus an R5 new-model decision. **If tier A lands, real
+bilingual documents are exactly what would test the first two.**
+

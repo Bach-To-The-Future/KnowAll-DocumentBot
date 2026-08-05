@@ -240,6 +240,13 @@ def test_the_support_rule_is_the_only_prompt_change():
     assert "SUPPORT:" in added and "word-for-word" in added
 
 
+def test_grounding_ships_OFF():
+    """MEASURED: rule 5 dropped answered questions from 13/15 to 2/15 on
+    llama3.2:1b. The default must stay false until the generator can satisfy
+    the output contract."""
+    assert Settings(_env_file=None).require_support_quotes is False
+
+
 def test_grounding_is_reversible():
     """require_support_quotes=false drops the rule AND the check."""
     from services.query import SYSTEM_PROMPT, PreparedQuery
@@ -253,7 +260,7 @@ def test_grounding_is_reversible():
 
 def test_ungrounded_answer_becomes_the_abstention_and_is_recorded():
     from services.query import NO_ANSWER_MESSAGE, PreparedQuery
-    service = make_service(FakeLLM())
+    service = make_service(FakeLLM(), require_support_quotes=True)
     prepared = PreparedQuery([{"index": 1, "text": "real text"}], "", {}, None)
     out = service._check_grounding(
         'Invented [1].\nSUPPORT:\n[1] "not in the passage"', prepared)
@@ -266,7 +273,7 @@ def test_ungrounded_answer_becomes_the_abstention_and_is_recorded():
 
 def test_a_grounded_answer_is_returned_with_the_support_block_stripped():
     from services.query import PreparedQuery
-    service = make_service(FakeLLM())
+    service = make_service(FakeLLM(), require_support_quotes=True)
     prepared = PreparedQuery([{"index": 1, "text": "Records are kept."}], "", {}, None)
     out = service._check_grounding(
         'Kept [1].\nSUPPORT:\n[1] "Records are kept."', prepared)
