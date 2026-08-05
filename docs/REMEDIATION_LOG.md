@@ -1873,3 +1873,95 @@ now say otherwise:
 > **Groundedness checking is a heavier item than the original audit assumed**,
 > and finding #5 (citations unverified) should be read as the parent of all
 > three rather than as a separate P2.
+
+## [Pre-reindex probe] F27 and F31 BOTH reproduce on the production collection
+Status: DONE · diagnostic, NOT a baseline · raw output:
+`eval/baselines/prereindex-probe-2026-08-05.txt`
+
+Taken because the information disappears the moment the reindex runs. The
+documents behind `knowall_collection` have no manifest, so nothing here is
+reproducible — but the collection has a **different composition** from tier B
+(376 points, 13 sources, mostly prose) and that is exactly what makes it worth
+measuring.
+
+### Coverage: 21 of 21
+
+The retired golden set resolves **completely**. A full measurement, not a
+subset.
+
+### recall_at_fetch is a real number for the first time
+
+    n                     : 21
+    recall_at_fetch       : 0.952      (20/21)
+    hit_at_k              : 0.952
+    mrr_at_k              : 0.897
+    false_abstention_rate : 0.000
+    mean candidates/query : 20 of 376 points = 5%
+
+On tier B, `fetch_k=20` against 18 chunks returned the entire corpus and 1.000
+was arithmetic. Here it selects 5% and one query's relevant chunk never enters
+the pool at all.
+
+**`mrr_at_k` (0.897) diverges from `hit_at_k` (0.952) for the first time.** On
+tier B they were identical in every run — first because results never exceeded
+one item, then because the reranker had no ordering headroom. Here it has
+headroom and does not always use it. That confirms the Phase 3 gating decision
+from the other direction: C2, C4 and C1+#30 need a corpus where ordering can
+move, and tier B is not one.
+
+### F27's table signature REPRODUCES — it is a system property
+
+    prose  n=2   min 0.9970  median 0.9979  max 0.9987   below old 0.25 floor: 0/2
+    table  n=3   min 0.0138  median 0.0777  max 0.4050   below old 0.25 floor: 2/3
+    list   n=16  min 0.0136  median 0.9083  max 0.9998   below old 0.25 floor: 1/16
+
+Two of three table answers sit below the old floor **on a corpus that is
+overwhelmingly prose**, and both are correct:
+
+    0.0138  "Comment dit-on 'Hello' en français ?"          French Vocabulaire.xlsx
+    0.0777  "What columns does the advertising dataset contain?"  advertising.csv
+
+Same shape, different corpus, same outcome. **Finding #27 is not a tier-B
+artifact**, and Phase 1A must test the shape effect against real documents
+rather than treat it as a synthetic quirk.
+
+Three caveats, recorded rather than smoothed:
+
+- `n=3` for tables is thin.
+- The shape classifier labels 16 of 21 chunks "list" (heuristic: ≥3 lines,
+  <8 words/line), which catches bulleted prose out of docx. That bucket is
+  heterogeneous and its range (0.0136–0.9998) partly reflects the classifier,
+  not a property of the data.
+- Three rank-1 chunks are simply WRONG, one of them at **0.9514** — a
+  confidently-scored incorrect top hit inside the *answerable* set. That is
+  F31's shape appearing where it was not being looked for.
+
+### F31's near-miss behaviour REPRODUCES — also a system property
+
+Four probes authored against these documents: squarely on a covered topic,
+asking for a specific the corpus does not contain.
+
+    0.9244  returned 5   "maximum number of nodes in a Databricks interactive cluster?"
+                         best chunk: cluster UI/CLI/REST text — nothing about limits
+    0.9211  returned 5   "Which Hadoop component replaced MapReduce in later releases?"
+                         best chunk: schema inference for JSON/XML — not even adjacent
+    0.5918  returned 5   "pass mark for the ABC DELF junior A2 exam?"
+                         best chunk: a French TV-viewing exercise
+    0.0008  ABSTAINED    "correlation coefficient between TV and newspaper spend?"
+
+**Three of four scored 0.59–0.92**, and the top two score higher than most
+*correct* answers in the same run. The 0.9211 case is the clearest
+demonstration in either corpus: a chunk about JSON/XML schema inference,
+scored at 0.92 against a question about MapReduce's successor.
+
+> A cross-encoder scores topical relevance, not answer presence, on real
+> documents exactly as on synthetic ones. No absolute bar separates them,
+> because the model is not measuring the thing the bar would need.
+
+### What this settles
+
+Both P1 findings are **system properties**, confirmed on two corpora of
+different composition. Neither is an artifact of the synthetic corpus, and
+Phase 1A inherits both as things to test against real documents rather than
+things to re-derive.
+

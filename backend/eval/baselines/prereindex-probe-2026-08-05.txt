@@ -1,0 +1,56 @@
+collection            : knowall_collection
+points                : 376
+distinct sources      : 13
+abstention_score_floor: 0.01
+rerank_score_floor    : 0.0
+retrieval_fetch_k     : 20
+
+=== 1. COVERAGE ===
+  legacy answerable entries : 21
+  resolvable here           : 21
+
+=== 2. RETRIEVAL on a 376-point, prose-heavy corpus ===
+  n                     : 21
+  recall_at_fetch       : 0.952   <- REAL now, not arithmetic
+  hit_at_k              : 0.952
+  mrr_at_k              : 0.897
+  false_abstention_rate : 0.0
+  mean candidates/query : 20  (tier B returned the whole corpus)
+
+=== F27 TABLE-ANSWER SIGNATURE — top-1 rerank score by chunk shape ===
+  prose  n=2   min=0.9970 median=0.9979 max=0.9987   below the OLD 0.25 floor: 0/2
+  table  n=3   min=0.0138 median=0.0777 max=0.4050   below the OLD 0.25 floor: 2/3
+  list   n=16  min=0.0136 median=0.9083 max=0.9998   below the OLD 0.25 floor: 1/16
+
+  per-entry:
+    0.0136 list   BAD How do you ask someone's age in French?   <- would have been CUT by the old floor
+    0.0138 table  ok  Comment dit-on 'Hello' en français ?   <- would have been CUT by the old floor
+    0.0777 table  ok  What columns does the advertising dataset contain?   <- would have been CUT by the old floor
+    0.4050 table  ok  Quelle préposition utilise-t-on pour dire qu'un obje
+    0.4701 list   ok  What exercises are in the ABC DELF junior A2 book?
+    0.5620 list   ok  How can data quality be verified on incremental load
+    0.6613 list   BAD What does Delta Lake add on top of a data lake?
+    0.6675 list   ok  What is minimized when fitting a linear regression m
+    0.8679 list   ok  What is the difference between horizontal and vertic
+    0.8681 list   ok  What are the stages of a data pipeline?
+    0.9005 list   ok  Which Hadoop ecosystem tool is used for SQL and whic
+    0.9160 list   ok  How does logistic regression predict outcomes?
+    0.9514 list   BAD What are the core components of Hadoop?
+    0.9522 list   ok  Which file formats are commonly used to store data i
+    0.9737 list   ok  What is the difference between an interactive cluste
+    0.9768 list   ok  What is the difference between an instance and a clu
+    0.9962 list   ok  Can Databricks be managed using PowerShell?
+    0.9970 prose  ok  When should you choose AWS Glue over Apache Airflow 
+    0.9983 list   ok  What is the difference between OLTP and OLAP?
+    0.9987 prose  ok  What tools can be used to monitor data quality and i
+    0.9998 list   ok  Which machine learning algorithm can be used for bot
+
+=== 3. F31 NEAR-MISS on real documents ===
+  top=0.9211 returned 5   Which Hadoop component replaced MapReduce in later releases?
+       best chunk: Data Engineer Concepts.docx 'Data Engineer Concepts\n\nunstructured) (JSON, XML)\nAutomatically infer schema and support s'
+  top=0.9244 returned 5   What is the maximum number of nodes in a Databricks interactive cluster?
+       best chunk: Databricks Certification.docx 'Databricks Certification\n\nterminate, and restart using UI, CLI, REST API\nMulti node – mult'
+  top=0.0008 ABSTAINED    What is the correlation coefficient between TV and newspaper advertising spend?
+       best chunk: Machine Learning Algorithms.docx 'Machine Learning Algorithms\n\nunknown features\nInstead of predicting the output variable di'
+  top=0.5918 returned 5   What is the pass mark for the ABC DELF junior A2 exam?
+       best chunk: ABC DELF junior A2.pdf 'WRENN Quelles sont vos émissions préférées à la télévision ? Pourquoi ? Quand regardez-vou'
