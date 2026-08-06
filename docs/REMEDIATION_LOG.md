@@ -2863,3 +2863,60 @@ everything else in P-3, and **`llama3.2:1b` is still what ships**. A defence
 that held only on the candidate would have been worthless to the running
 system.
 
+## [Phase 4.3] Payload metadata hygiene — 18 fields, one real defect
+Status: DONE (the defect) · decisions recorded (the rest)
+
+Audited against the live collection, not the code's intentions. **18 fields,
+not 12** — 2.1 added `embed_model` / `embed_model_digest` and F29 widened
+`section_title` coverage since the finding was filed.
+
+### The defect: `etag` is FILTERED but was never INDEXED
+
+    delete_stale()  must=[source]  must_not=[etag]      qdrant_store.py:370
+
+`etag` is the staged swap's cut-over condition — it runs on **every ingest** —
+and it was not in `REQUIRED_PAYLOAD_INDEXES`, so that delete full-scanned the
+collection every time. Now indexed.
+
+Found by asking *which fields appear in a `FieldCondition`* rather than by
+profiling, because a full scan on 376 points is invisible until it is not.
+That is the same shape as 2.6: the cost is silent and grows with the corpus.
+
+Pinned as an **invariant, not an instance**: a static test parses every
+`FieldCondition(key=…)` and every entry of `REQUIRED_PAYLOAD_INDEXES` out of
+the source and asserts containment, so a *new* filter on an unindexed field
+fails CI. Deliberately static — it reads the file rather than importing the
+module, so it runs without `fastembed` and cannot be defeated by a mock.
+
+### Field-by-field decision
+
+| field | points | verdict |
+|---|---|---|
+| `source` | 376 | INDEXED — selection, deletion |
+| `chunk_seq` | 376 | INDEXED — window expansion |
+| `section_title` | 162 | INDEXED — parent retrieval |
+| `etag` | 376 | **NOW INDEXED** — the defect above |
+| `text` | 376 | keep — the payload itself |
+| `embed_model`, `embed_model_digest` | 376 | keep — phase 2.1 identity, read by the reindex verifier |
+| `page_number` | 214 | **keep** — citation precision, and D1+D6 makes it load-bearing |
+| `table_id`, `headers`, `row_range`, `sheet_name` | 76–85 | **keep** — table provenance; same citation-precision argument |
+| `file_format` | 376 | keep — used by `verify_reindex.py` reporting |
+| `key`, `chunk_index`, `total_chunks` | 376 | **drop candidates** — `key` duplicates `source`+index; the other two predate `chunk_seq` |
+| `content_type`, `image_count` | 376 / 210 | **drop candidates** — write-only, never read |
+
+**The drops are NOT applied.** Removing a payload field only takes effect on
+reindex, and payload shape is corpus state: dropping five fields is a data
+migration, not a code change. 4.1's alias path now makes that safe to do, but
+it should ride along with a reindex that is happening anyway rather than
+forcing one. Recorded as decided-but-deferred rather than done.
+
+### The coverage gap under any section-based filtering
+
+`section_title` is present on **162 of 376** points. F29 added it to csv, xlsx
+and pptx, but **214 points are PDF and still bare** — per-page sections would
+be singletons, worse than the ±1 window PDFs use today.
+
+> Any future decision to filter or route on `section_title` inherits a 43%
+> coverage floor on this corpus. A filter on it silently excludes every PDF
+> chunk, which is the majority.
+

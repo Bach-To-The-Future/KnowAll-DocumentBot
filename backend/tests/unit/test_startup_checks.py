@@ -115,3 +115,29 @@ def test_readiness_reports_degraded_when_an_index_is_MISSING() -> None:
 def test_a_healthy_store_reports_no_missing_indexes() -> None:
     from tests.unit.fakes import FakeVectorStore
     assert FakeVectorStore().missing_payload_indexes() == []
+
+
+# --- 4.3: every filtered field must be indexed -------------------------------
+
+def test_every_field_used_in_a_qdrant_filter_is_indexed() -> None:
+    """Phase 4.3. `etag` was filtered by delete_stale()'s must_not clause and
+    was not in REQUIRED_PAYLOAD_INDEXES, so the staged cut-over of every ingest
+    full-scanned. This pins the INVARIANT rather than the one instance: a new
+    FieldCondition on an unindexed field fails here.
+
+    Deliberately STATIC -- it reads the source rather than importing the
+    module, so it runs without fastembed and cannot be defeated by a mock.
+    """
+    import re
+    from pathlib import Path
+
+    source = (Path(__file__).resolve().parents[2]
+              / "integrations" / "qdrant_store.py").read_text(encoding="utf-8")
+
+    filtered = set(re.findall(r'FieldCondition\(\s*key="([^"]+)"', source))
+    block = re.search(r"REQUIRED_PAYLOAD_INDEXES = \((.*?)\n\)", source, re.S)
+    assert block, "REQUIRED_PAYLOAD_INDEXES not found"
+    indexed = set(re.findall(r'\(\s*"([^"]+)"', block.group(1)))
+
+    assert filtered, "no FieldCondition found — the regex has drifted"
+    assert filtered <= indexed, f"filtered but NOT indexed: {filtered - indexed}"

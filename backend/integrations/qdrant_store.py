@@ -27,6 +27,12 @@ REQUIRED_PAYLOAD_INDEXES = (
     ("source", qm.PayloadSchemaType.KEYWORD),
     ("chunk_seq", qm.PayloadSchemaType.INTEGER),
     ("section_title", qm.PayloadSchemaType.KEYWORD),
+    # Phase 4.3: `etag` is FILTERED by delete_stale() — the staged swap's
+    # must_not clause — and was never indexed, so the atomic cut-over of every
+    # ingest ran a full scan. Found by auditing which payload fields appear in
+    # a FieldCondition rather than by profiling, because a full scan on a small
+    # collection is invisible until it is not.
+    ("etag", qm.PayloadSchemaType.KEYWORD),
 )
 
 DENSE_VECTOR = "dense"
