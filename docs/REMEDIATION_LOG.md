@@ -2760,3 +2760,64 @@ Steady-state under high concurrency is ~5.6 GiB.
 Nothing OOM'd in any phase, and no silent empties appeared under any pressure.
 But **8 GiB is the defensible limit for this generator**, not 6.
 
+## [Phase 2.2-pre] Post-C3 assembled-prompt token distribution
+Status: DONE · `scripts/prompt_distribution.py`
+
+Measured over **real retrieval** — `QueryService.build_prompt` on chunks the
+retriever actually returned — not synthetic text. The D6 lesson applies: a
+constructed prompt measures what its author believed the pipeline assembles.
+
+### Valid run: `knowall_eval`, the corpus the golden set targets
+
+    knobs: rerank_top_n=5  parent_char_budget=4000  context_mode=section
+
+    ASSEMBLED PROMPT (system + context + question), n=23
+      min=329  p25=346  MEDIAN=5140  p75=5265  p95=5367  max=5375
+      over 8192: 0      within 20% of it: 0
+      median = 63% of the context budget
+
+**Nothing crosses the 8192 context budget**, and the maximum (5375) sits 34%
+below it.
+
+### The answer to the over-provisioning question: NEITHER
+
+The maintainer framed two outcomes — median far below the ceiling (bound the
+tail) or median near it (the budget is oversized, reducing it is a latency
+lever). The measurement lands between them, at **63%**:
+
+- **Not a tail phenomenon.** The distribution is tightly clustered: p25=346
+  then a jump to a 5140-5375 plateau. There is no long tail to bound — prompts
+  are either tiny (a single small chunk) or essentially full-size.
+- **Not systematically oversized either**, in the sense of overflowing. The
+  budget is never exceeded and never approached.
+
+But 5140 tokens is the **input to the latency curve**: ~48s warm single-shot at
+~7,700 tokens, and prefill dominates. So `parent_char_budget` is a latency lever
+whether or not it is a truncation risk — cutting it would cut prefill roughly
+proportionally.
+
+> **That trade is retrieval quality against latency, and only eval can settle
+> it.** Not tuned here. R3 and the tier-A gate both apply: a value fitted to
+> tier B's composition is fitted to the corpus, not the system.
+
+### A measurement error caught in my own script
+
+The first version printed per-chunk token counts under the heading *"the
+embedding budget applies here"* and reported **16 chunks over 2048**. That is
+wrong. Those are chunks **after context expansion**, which is what enters the
+prompt; the embedding budget applies to the chunk **as stored**, before
+expansion, and expanded text is never re-embedded. `verify_reindex.py` already
+measures the right thing (max ~1056 tokens stored).
+
+Had it been reported as written, it would have looked like an active F19 breach
+— 16 chunks silently truncated at embedding time — when no such thing occurs.
+Corrected in place, and the heading now names what it measures.
+
+### A second run that is NOT evidence
+
+Also ran against `knowall_collection`, which produced median=4592 (56%) — but
+**24 of 32 golden questions returned zero chunks** there, because the golden set
+targets tier B and that collection holds the real documents. n=8 prompts from
+mismatched questions is not a distribution. Recorded so the number is not
+mistaken for a second data point.
+
