@@ -9,7 +9,6 @@ Two channels:
 import json
 import logging
 import time
-import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
 
@@ -30,8 +29,9 @@ WINDOW_TTL = 24 * 3600
 _TIMING_KEYS = ("rewrite_ms", "expansion_ms", "retrieval_ms", "generation_ms")
 
 
-def new_trace_id() -> str:
-    return uuid.uuid4().hex[:12]
+# Phase 4.2: the definition moved to core/tracing.py, which also owns adoption
+# of a caller-supplied id. Re-exported so existing imports keep working.
+from core.tracing import new_trace_id  # noqa: E402,F401
 
 
 def log_event(event: str, **fields: object) -> None:

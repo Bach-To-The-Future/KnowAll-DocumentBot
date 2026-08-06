@@ -31,6 +31,7 @@ from arq.connections import RedisSettings
 
 from core.config import Settings, get_settings
 from core.model_identity import verify_embedding_model, verify_generation_model
+from core.tracing import new_trace_id
 from services.container import ServiceContainer, build_container
 
 logging.basicConfig(level=logging.INFO)
@@ -126,7 +127,13 @@ def _kill_pool() -> None:
 
 def _dead_letter(container: ServiceContainer, job_id: str, payload: dict[str, Any],
                  error: str) -> None:
-    """Failed jobs land here instead of disappearing after the last retry."""
+    """Failed jobs land here instead of disappearing after the last retry.
+
+    Phase 4.2: `payload` carries `trace_id`, so a dead-lettered document can be
+    traced back to the upload that produced it. Without it a DLQ entry names a
+    file and an error and nothing that connects them to a user action —
+    an orphan with a job id nobody kept.
+    """
     container.cache.list_push_trim(
         DLQ_KEY,
         json.dumps({"job_id": job_id, "failed_at": time.time(), "error": error, **payload},
@@ -134,7 +141,10 @@ def _dead_letter(container: ServiceContainer, job_id: str, payload: dict[str, An
         max_len=DLQ_MAX_LEN,
         ttl_seconds=DLQ_TTL,
     )
-    logger.error(f"[job {job_id}] Dead-lettered: {error}")
+    logger.error(
+        f"[job {job_id}] [trace {payload.get('trace_id', '-')}] "
+        f"Dead-lettered: {error}"
+    )
 
 
 # --- arq hooks ----------------------------------------------------------------
@@ -178,9 +188,15 @@ async def shutdown(ctx: dict) -> None:
 
 
 async def ingest_document(ctx: dict, job_id: str, bucket: str, object_name: str,
-                          file_name: str, etag: str) -> None:
+                          file_name: str, etag: str,
+                          trace_id: str | None = None) -> None:
+    # Phase 4.2. Defaulted so jobs enqueued by a previous version still run:
+    # arq replays the arguments it stored, and a required parameter would make
+    # every in-flight job fail on deploy.
     container = get_container()
-    payload = {"bucket": bucket, "object_name": object_name, "etag": etag}
+    trace_id = trace_id or new_trace_id()
+    payload = {"bucket": bucket, "object_name": object_name, "etag": etag,
+               "trace_id": trace_id}
     attempt = ctx.get("job_try", 1)
     loop = asyncio.get_running_loop()
 
@@ -195,7 +211,7 @@ async def ingest_document(ctx: dict, job_id: str, bucket: str, object_name: str,
     except TimeoutError:
         _kill_pool()
         error = f"Ingestion exceeded {_settings.ingest_job_timeout}s and was terminated."
-        logger.error(f"[job {job_id}] {error}")
+        logger.error(f"[job {job_id}] [trace {trace_id}] {error}")
     except Exception as e:
         error = str(e)
         logger.exception(f"[job {job_id}] Ingestion attempt {attempt} failed")

@@ -94,12 +94,20 @@ class IngestionService:
             shutil.rmtree(tmp_dir, ignore_errors=True)
 
     def run_fallback(self, job_id: str, bucket: str, object_name: str,
-                     file_name: str, etag: str) -> None:
-        """BackgroundTasks path (no Redis): single attempt, failure recorded."""
+                     file_name: str, etag: str, trace_id: str = "-") -> None:
+        """BackgroundTasks path (no Redis): single attempt, failure recorded.
+
+        Phase 4.2: `trace_id` is defaulted so the signature stays compatible
+        with callers that predate it, and appears in the failure line — this
+        path has no DLQ, so the log IS the record.
+        """
         try:
             self.execute(job_id, bucket, object_name, file_name, etag)
         except Exception as e:
-            logger.exception(f"[job {job_id}] Ingestion failed for '{object_name}'")
+            logger.exception(
+                f"[job {job_id}] [trace {trace_id}] Ingestion failed for "
+                f"'{object_name}'"
+            )
             self._job_store.update(job_id, status="failed", error=str(e))
 
     # --- pipeline -------------------------------------------------------------

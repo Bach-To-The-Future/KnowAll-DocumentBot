@@ -94,6 +94,14 @@ async function proxy(
     req.headers.get("x-forwarded-for") ?? req.headers.get("x-real-ip");
   if (clientIp) headers.set("x-forwarded-for", clientIp);
 
+  // Phase 4.2: forward the browser's trace id unchanged so an upload can be
+  // followed into worker logs and, if it fails, into the DLQ entry. UNLIKE
+  // x-user-id above this is NOT an identity and carries no trust — the API
+  // sanitises it and mints a replacement if it is malformed. It is relayed
+  // verbatim precisely so correlation survives; nothing authorises on it.
+  const traceId = req.headers.get("x-trace-id");
+  if (traceId) headers.set("x-trace-id", traceId);
+
   const init = {
     method: req.method,
     headers,
@@ -118,7 +126,11 @@ async function proxy(
   // Allowlist rather than blanket copy: hop-by-hop and auth-bearing headers
   // must not be relayed, but backpressure signals must be — a 429/503 whose
   // Retry-After is stripped is a client that cannot back off correctly.
-  const PASS_THROUGH = ["content-type", "retry-after", "content-disposition"];
+  // x-trace-id is echoed back so the browser can log the id the server
+  // actually used, which differs from the one it sent when that was
+  // malformed or absent.
+  const PASS_THROUGH = ["content-type", "retry-after", "content-disposition",
+                        "x-trace-id"];
   const responseHeaders = new Headers();
   for (const name of PASS_THROUGH) {
     const value = upstream.headers.get(name);

@@ -3,7 +3,15 @@ import logging
 import tempfile
 
 from arq.constants import default_queue_name
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Request, UploadFile
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    File,
+    Request,
+    Response,
+    UploadFile,
+)
 from starlette.concurrency import run_in_threadpool
 
 from api.dependencies import (
@@ -15,6 +23,8 @@ from api.dependencies import (
 from core.config import Settings
 from core.exceptions import JobNotFoundError, PayloadTooLargeError, ServiceOverloadedError
 from core.interfaces import JobStore
+from core.telemetry import log_event
+from core.tracing import TRACE_HEADER, adopt_trace_id
 from models.schemas import DeleteDocumentsRequest, IngestAccepted, MinIOIngestRequest
 from services.container import ServiceContainer
 from services.ingestion import IngestionService, sanitize_object_name
@@ -48,9 +58,13 @@ async def _assert_queue_has_room(pool, settings: Settings) -> None:
         )
 
 
-async def _queue(request: Request, background_tasks: BackgroundTasks,
+async def _queue(request: Request, response: Response, background_tasks: BackgroundTasks,
                  ingestion: IngestionService, bucket: str, object_name: str,
                  settings: Settings) -> IngestAccepted:
+    # Phase 4.2: adopt the caller's trace id (sanitised) or mint one, and
+    # carry it into the job so an asynchronous failure is traceable back
+    # to the upload that caused it.
+    trace_id = adopt_trace_id(request.headers.get(TRACE_HEADER))
     pool = request.app.state.arq_pool
     await _assert_queue_has_room(pool, settings)
     # create_job does blocking MinIO + Redis I/O; this coroutine must not.
@@ -58,13 +72,18 @@ async def _queue(request: Request, background_tasks: BackgroundTasks,
     if pool is not None:  # durable queue
         await pool.enqueue_job(
             "ingest_document", job["job_id"], job["bucket"], job["object_name"],
-            job["file_name"], job["etag"],
+            job["file_name"], job["etag"], trace_id,
         )
     else:  # dev fallback: in-process, single attempt
         background_tasks.add_task(
             ingestion.run_fallback, job["job_id"], job["bucket"], job["object_name"],
-            job["file_name"], job["etag"],
+            job["file_name"], job["etag"], trace_id,
         )
+    # Echo the ADOPTED id: it differs from the supplied one whenever that
+    # was malformed or absent, and the client needs the value actually used.
+    response.headers[TRACE_HEADER] = trace_id
+    log_event("ingest_queued", trace_id=trace_id, job_id=job["job_id"],
+              object_name=job["object_name"])
     return IngestAccepted(
         job_id=job["job_id"], status="queued", status_url=f"/ingest/status/{job['job_id']}"
     )
@@ -73,6 +92,7 @@ async def _queue(request: Request, background_tasks: BackgroundTasks,
 @router.post("/upload/", status_code=202, response_model=IngestAccepted)
 async def upload(
     request: Request,
+    response: Response,
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     container: ServiceContainer = Depends(get_container),
@@ -100,19 +120,20 @@ async def upload(
         await run_in_threadpool(container.storage.upload_fileobj, buffer, object_name)
 
     logger.info(f"Uploaded '{object_name}' ({size} bytes) to MinIO")
-    return await _queue(request, background_tasks, container.ingestion,
+    return await _queue(request, response, background_tasks, container.ingestion,
                         container.storage.bucket, object_name, settings)
 
 
 @router.post("/ingest_from_minio", status_code=202, response_model=IngestAccepted)
 async def ingest_from_minio(
     request: Request,
+    response: Response,
     req: MinIOIngestRequest,
     background_tasks: BackgroundTasks,
     ingestion: IngestionService = Depends(get_ingestion_service),
     settings: Settings = Depends(get_settings_dep),
 ):
-    return await _queue(request, background_tasks, ingestion,
+    return await _queue(request, response, background_tasks, ingestion,
                         req.bucket, req.object_name, settings)
 
 
