@@ -16,6 +16,7 @@ from typing import Any
 from starlette.concurrency import run_in_threadpool
 
 from core.config import Settings, get_settings
+from core.constants import CORPUS_VERSION_KEY
 from core.exceptions import InvalidRequestError
 from core.interfaces import CacheStore, DenseEmbedder, LLMClient
 from core.telemetry import Telemetry, log_event, new_trace_id, timed
@@ -29,7 +30,6 @@ logger = logging.getLogger(__name__)
 
 NO_ANSWER_MESSAGE = "I could not find this information in the provided documents."
 
-CORPUS_VERSION_KEY = "corpus:version"
 
 # Instructions live in the system message; only context + question go in the
 # user turn, so instruction-following survives long contexts.

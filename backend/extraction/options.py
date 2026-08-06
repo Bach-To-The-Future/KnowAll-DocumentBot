@@ -7,7 +7,6 @@ from extraction.base import BaseExtractor
 from extraction.csv import ExtractCSV
 from extraction.docx_format import ExtractDOCX
 from extraction.excel import ExtractXLSX
-from extraction.helm import ExtractHELM
 from extraction.pdf import ExtractPDF
 from extraction.pptx import ExtractPPTX
 from extraction.txt import ExtractTXT
@@ -26,7 +25,13 @@ class ExtractStrategy(Enum):
     PPTX = ExtractPPTX
     TXT = ExtractTXT
     MD = ExtractTXT
-    HELM = ExtractHELM
+    # Phase 4.4: ExtractHELM was a subclass of ExtractTXT that added a log
+    # line and nothing else. The CLASS was dead; the EXTENSION was not —
+    # dispatch is by suffix, so a .helm upload reached it. Mapped straight
+    # to ExtractTXT so behaviour is byte-identical and the capability
+    # survives. Not offered by the UI's accept list, which is a product
+    # decision, not a code one.
+    HELM = ExtractTXT
 
     @classmethod
     def get_extractor(cls, file_path: str) -> BaseExtractor:

@@ -8,13 +8,13 @@ import tempfile
 import uuid
 
 from core.config import Settings
+from core.constants import CORPUS_VERSION_KEY
 from core.exceptions import ExtractionError, InvalidRequestError
 from core.interfaces import CacheStore, ChunkLike, DenseEmbedder, JobStore, VectorStore
 from core.model_identity import verify_embedding_model
 from core.token_budget import check_embedding_budget
 from integrations.object_storage import MinIOObjectStorage
 from models.schemas import VectorRecord
-from services.query import CORPUS_VERSION_KEY
 
 logger = logging.getLogger(__name__)
 
