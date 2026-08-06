@@ -88,7 +88,7 @@ contract, so option 3 makes it viable with no code change.
 
 ---
 
-## 1c. Standing rule, earned four times over
+## 1c. Standing rule, earned six times over
 
 > **A component test of a checker is not evidence the checked-for thing
 > occurs.** Every guard needs a measurement against real pipeline output, not
@@ -105,6 +105,20 @@ Four instances in this engagement:
 4. P-3's 17 grounding tests were **green while the mechanism measured 0/15** —
    they fed well-formed SUPPORT blocks to the parser and never asked whether the
    generator could produce one.
+5. The grounding checker compared quotes against `citation["text"]`, while
+   `build_prompt` shows the model `[n] (Source: f.txt)
+<text>`. The model
+   copied the provenance header along with the sentence — faithfully — and was
+   marked ungrounded for it.
+6. **The diagnostic written to investigate instance 5 reproduced instance 5.**
+   It built its own citation fixtures without a `source` key, so the header it
+   reconstructed was `(Source: )`, and it reported the fix as not working. The
+   pattern appeared *inside the tool built to find the pattern*.
+
+> Instance 6 is the strongest argument for the rule. The failure mode is not
+> carelessness — it is that a fixture is written from what the author believes
+> the pipeline produces, and that belief is exactly what is under test. Knowing
+> about the trap does not exempt you from it.
 
 ---
 
