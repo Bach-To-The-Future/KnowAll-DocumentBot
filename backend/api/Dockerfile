@@ -9,16 +9,34 @@ FROM python@sha256:401f6e1a67dad31a1bd78e9ad22d0ee0a3b52154e6bd30e90be696bb6a3d7
 
 WORKDIR /app
 
-# tesseract powers OCR for scanned PDFs (English + French models).
-# KNOWN GAP — finding #26 (P3, Phase 4): apt is unpinned, so the tesseract
-# build and its traineddata are fixed only by the base-image digest plus
-# Debian's snapshot at build time. A traineddata change would move OCR output
-# with no diff in this repository. The agreed fix is to vendor eng/fra
-# traineddata from a tagged tessdata release, checksummed in a manifest and
-# COPY'd in with TESSDATA_PREFIX set. Not done here; Phase 1 is not blocked on it.
+# tesseract powers OCR for scanned PDFs (English + French).
+#
+# Finding #26, now CLOSED. The base-image digest pins the tesseract BINARY; it
+# does NOT pin the traineddata. `tesseract-ocr-fra` resolved against Debian's
+# archive at build time, so a traineddata refresh would change OCR output with
+# no diff anywhere in this repository — and OCR output is corpus content, so
+# every stored vector and every eval number would move silently.
+#
+# Engine from apt; language data vendored and checksummed below.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-fra \
+    && apt-get install -y --no-install-recommends tesseract-ocr \
     && rm -rf /var/lib/apt/lists/*
+
+# Language data pinned by checksum rather than by archive state.
+# tesseract-ocr/tessdata @ 4.1.0 — the standard models Debian also ships, chosen
+# so vendoring PINS current behaviour instead of changing it.
+#
+# The per-language apt packages are deliberately NOT installed, so there is no
+# system copy for TESSDATA_PREFIX to be shadowed by. A vendored file sitting
+# unused beside a system copy is exactly the failure this prevents, which is
+# why scripts/verify_ocr.py asserts RESOLUTION rather than presence.
+COPY vendor/tessdata/ /opt/tessdata/
+ENV TESSDATA_PREFIX=/opt/tessdata
+# In a real script file rather than an inline `python -c`: an embedded
+# multi-line command already broke this Dockerfile once (finding #25), and the
+# same pattern is used by api/verify_model_pins.py.
+COPY api/verify_tessdata.py /tmp/verify_tessdata.py
+RUN python /tmp/verify_tessdata.py && rm /tmp/verify_tessdata.py
 
 COPY api/requirements.txt ./api/requirements.txt
 

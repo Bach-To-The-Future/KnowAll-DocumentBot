@@ -64,7 +64,7 @@ Verdict key: **CONFIRMED** · **ALREADY FIXED** · **INCORRECT — actual state 
 | 23 | P3 | pytest in-container emits `PytestCacheWarning: Permission denied: /app/.pytest_cache` — the non-root `appuser` cannot write the cache dir | container pytest output |
 | **24** | **P1** | `nomic-embed-text:latest` is a moving tag and Ollama cannot pull or run by digest, so drift is undetectable. Fixed by ASSERTION (`core/model_identity.py`), not by reference | `/api/tags`; `ollama pull ...@sha256:` → `invalid model name` | **RESOLVED** |
 | **25** | **P2** | Base images pinned by tag and fastembed model repos unpinned — no build was reproducible, so no baseline was either | `api/Dockerfile`, `frontend/Dockerfile` | **RESOLVED** (`4e43c04`) |
-| 26 | P3 | apt-installed tesseract and its traineddata are unpinned; an OCR output change would leave no diff in this repository | `api/Dockerfile` apt layer | **OPEN** — Phase 4, vendor tessdata from a tagged release |
+| 26 | P3 | apt-installed tesseract and its traineddata are unpinned; an OCR output change would leave no diff in this repository | `api/Dockerfile` apt layer | **CLOSED** — vendored tessdata 4.1.0, checksummed, build-time gate, resolution and content verified |
 | **27** | **P1** | `rerank_score_floor` is an absolute cut on a cross-encoder score whose scale tracks chunk SHAPE (prose vs table/list/OCR). Correctly-ranked first-place chunks are discarded and the user sees an abstention | tier-B baseline: `recall@fetch=1.0` vs `hit@k=0.318`, all 15 failures returned 0 chunks; 3/21 on the real corpus, all table/list answers | **OPEN** — P1 (promoted from P2: the entire quality gap is post-retrieval). Diagnostics done, PROPOSAL P-2 pending, no knob touched |
 | **28** | **P1** | Query-rewrite fallback catches exceptions, empty output and length overruns but NOT semantic drift. A records-retention follow-up rewritten as a hazardous-waste question is fluent, correctly sized, and passes every guard | full-mode run 2026-08-04; 3-5 distinct rewrites per input over 10 calls | **FIXED** (`b6a6f00`) — embedding-similarity guard + per-entry instrumentation |
 | **29** | P2 | csv, xlsx and pptx chunks carry no `section_title` at all, so section expansion degraded to a ±1 window and the reranker saw bare row-groups | 13/22 rank-1 chunks on tier B had no section metadata | **FIXED** (`64b9a35`) |
@@ -2919,4 +2919,52 @@ be singletons, worse than the ±1 window PDFs use today.
 > Any future decision to filter or route on `section_title` inherits a 43%
 > coverage floor on this corpus. A filter on it silently excludes every PDF
 > chunk, which is the majority.
+
+## F26 CLOSED — tesseract language data vendored and verified
+Status: DONE
+
+The base-image digest pinned the tesseract **binary**; it never pinned the
+**traineddata**. `apt-get install tesseract-ocr-fra` resolved against Debian's
+archive at build time, so a traineddata refresh would have changed OCR output
+with no diff anywhere in this repository — and OCR output is corpus content, so
+every stored vector and every eval number would have moved silently.
+
+    tesseract-ocr/tessdata @ 4.1.0
+      eng.traineddata  23.5 MB  daa0c97d651c19fba3b25e81317cd697e9908c8208090c94c3905381c23fc047
+      fra.traineddata  14.2 MB  eac01c1d72540d6090facb7b2f42dd0a2ee8fc57c5be1b20548ae668e2761913
+
+**Standard `tessdata`, not `tessdata_fast`.** The point of vendoring is to PIN
+current behaviour; `_fast` would have changed OCR output while claiming to fix
+reproducibility.
+
+**The per-language apt packages are no longer installed.** With no system copy
+present there is nothing for `TESSDATA_PREFIX` to be shadowed by. The
+maintainer's point applies directly: the presence of the right file is not
+evidence it is the one being read — the same coincidence that made the
+HuggingFace revision pin look like it worked when it did not. Removing the
+ambiguity beats testing around it.
+
+### Verified against SILENT GARBAGE, not against non-empty output
+
+    1. MANIFEST    both files match their committed sha256
+    2. RESOLUTION  TESSDATA_PREFIX=/opt/tessdata, and
+                   tesseract --list-langs reports: "/opt/tessdata/" (2)
+    3. CONTENT     b09  61 chars  'ARCHIVED NOTICE ... 75000 dollars.'   3/3 strings
+                   b13 117 chars  'AVIS ARCHIVE ... avant le 31 mars.'   4/4 strings
+
+Byte-identical to the pre-change baseline in both languages. A word count would
+have passed on garbage; `'plafond'` and `'31 mars'` would not. If the vendored
+French model had failed to load while English held, that asymmetry is the only
+place the shadowing failure would have shown.
+
+### Two self-inflicted build failures, both the same shape
+
+1. The inline check imported `yaml`, but the layer runs **before**
+   `pip install`. It failed the build for the wrong reason.
+2. Rewritten as a multi-line `python -c`, shell escaping mangled it — the same
+   failure that broke this Dockerfile during finding #25.
+
+Moved into `api/verify_tessdata.py`, the pattern `api/verify_model_pins.py`
+already established. The lesson had been learned and written down, and I
+reintroduced it anyway by not applying it.
 

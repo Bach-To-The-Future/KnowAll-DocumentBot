@@ -1,0 +1,35 @@
+# Vendored tesseract language data — finding #26.
+#
+# WHY THESE ARE COMMITTED RATHER THAN apt-INSTALLED
+# The base image is pinned by digest (finding #25), which pins the tesseract
+# BINARY. It does not pin the traineddata: `apt-get install tesseract-ocr-fra`
+# resolves against Debian's archive at build time, and a traineddata refresh
+# would change OCR output with NO DIFF ANYWHERE IN THIS REPOSITORY.
+#
+# That matters because OCR output is corpus content. A changed model rewrites
+# the text that gets chunked, embedded and retrieved — every stored vector and
+# every eval number moves, and nothing in the system would report it.
+#
+# WHY COPY RATHER THAN download-at-build
+# A checksum-verified download still fails closed if upstream deletes the tag,
+# and it needs network during the build. 37.7 MB of binary is the price of a
+# build that cannot be broken by someone else's repository.
+#
+# WHY THIS TAG
+# tesseract-ocr/tessdata @ 4.1.0 — the standard (not `_fast`, not `_best`)
+# models, matching what Debian ships, chosen so vendoring PINS current
+# behaviour rather than changing it. Verified: OCR output on the tier-B
+# image-only PDFs is byte-identical before and after (see scripts/verify_ocr.py).
+
+source: https://github.com/tesseract-ocr/tessdata
+tag: "4.1.0"
+retrieved: 2026-08-06
+tessdata_prefix: /opt/tessdata
+
+files:
+  - name: eng.traineddata
+    sha256: daa0c97d651c19fba3b25e81317cd697e9908c8208090c94c3905381c23fc047
+    bytes: 23466654
+  - name: fra.traineddata
+    sha256: eac01c1d72540d6090facb7b2f42dd0a2ee8fc57c5be1b20548ae668e2761913
+    bytes: 14213351
