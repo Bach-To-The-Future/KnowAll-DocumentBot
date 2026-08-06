@@ -2779,6 +2779,25 @@ constructed prompt measures what its author believed the pipeline assembles.
 **Nothing crosses the 8192 context budget**, and the maximum (5375) sits 34%
 below it.
 
+### The shape is BIMODAL, and the mechanism explains it
+
+    p25 = 346          |  the abstention path: C3 returned ONE chunk, or none
+    5140-5375 plateau  |  the answering path: C3 returned FIVE
+
+Two populations, not a distribution with a tail. C3 either admits
+`rerank_top_n=5` chunks or the abstention floor cuts to nothing — there is no
+middle.
+
+**The plateau spans 4%** (5140 to 5375) across the entire upper mode.
+`parent_char_budget=4000 x rerank_top_n=5` therefore produces an almost
+**fixed-size** prompt on every answering query.
+
+> Consequence for the latency curve: prompt size is essentially **constant on
+> the answering path**, so ~48s warm is close to the per-query cost of *every
+> real answer* — not an average over a spread. Predictable, and **not reducible
+> by trimming outliers**, because there are none. The only lever is the budget
+> itself.
+
 ### The answer to the over-provisioning question: NEITHER
 
 The maintainer framed two outcomes — median far below the ceiling (bound the

@@ -173,6 +173,25 @@ concrete rules that follow:
 - **Discard the first measurement of any series**, or warm the model first. A
   cold load costs more than the thing being measured.
 
+### 1d-bis. The other failure class: a correct measurement of the wrong quantity
+
+The impossible-shape check catches results that are physically incoherent. It
+would **not** have caught this one, because the number was perfectly plausible:
+
+> `prompt_distribution.py` reported **16 chunks over the 2048-token embedding
+> budget**. The count was correct. The quantity was wrong — those were chunks
+> *after context expansion*, and the embedding budget applies to the chunk *as
+> stored*, before expansion. Expanded text is never re-embedded, so no breach
+> existed.
+
+What makes this class dangerous is that it arrives **maximally credible**: it
+confirmed finding #19, which was already in the backlog. A number that agrees
+with what you expect gets *less* scrutiny, not more — it reads as
+confirmation rather than as a claim needing a check.
+
+> **Rule: before reporting a number, state what it measures, and confirm the
+> threshold applies to the same thing.** Same units is not the same object.
+
 ## 2. What is measured, what is assumed
 
 ### Measured, with evidence in the log
