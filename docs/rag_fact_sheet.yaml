@@ -1,0 +1,201 @@
+# Machine-readable companion to docs/HANDOFF.md §5.
+#
+# Every value here was read from source or measured in a running stack, not
+# inferred from documentation. `source` gives file:line where a value is
+# configured; `measured` marks numbers that came from a run rather than a
+# setting, with the script that produced them.
+#
+# Regenerate the measured values with:
+#   scripts/prompt_distribution.py   prompt + chunk token distributions
+#   scripts/verify_reindex.py        stored-chunk tokens, payload coverage
+#   scripts/stability_probe.py       memory, latency, concurrency
+#   scripts/verify_ocr.py            OCR resolution and content
+
+schema_version: 2
+generated: 2026-08-07
+generator_note: >
+  Values describe the system AS SHIPPED, which still uses llama3.2:1b.
+  The candidate generator qwen3.5:4b was measured but NOT adopted — see
+  HANDOFF.md §2.
+
+embedding:
+  model: nomic-embed-text:latest
+  dimensions: 768
+  distance: cosine
+  source: core/config.py:50,65
+  asymmetric_prefixes:
+    document: "search_document:"
+    query: "search_query:"
+    note: load-bearing; the model is trained for them
+  token_limit: 2048
+  truncation_behaviour: >
+    SILENT. Returns HTTP 200 with a well-formed 768-dim vector computed from a
+    prefix of the text. Nothing downstream can detect it.
+  guard: core/token_budget.py:116
+  measured_max_stored_chunk_tokens: 1056
+  measured_by: scripts/verify_reindex.py
+  boundary_currently_crossed: false
+
+generation:
+  model: llama3.2:1b
+  source: core/config.py:70
+  num_ctx: 8192
+  num_predict: 1024
+  temperature: 0.1
+  seed: null
+  seed_note: >
+    Deliberately unset. A seed would make the eval reproducible while hiding
+    the nondeterminism real users get.
+  measured_distinct_outputs_per_10_calls: [3, 5]
+  reasoning_enabled: false
+  reasoning_flag: core/config.py:82
+
+retrieval:
+  strategy: hybrid dense + sparse, server-side fusion, cross-encoder rerank
+  sparse_model: Qdrant/bm25
+  reranker_model: BAAI/bge-reranker-base
+  fetch_k: 20
+  rerank_top_n: 5
+  abstention_score_floor: 0.01
+  abstention_floor_basis: >
+    A cross-encoder sigmoid below 0.01 is a logit near -4.6: the model
+    confidently rejects even its own best candidate. Tied to the model's
+    confidence semantics, NOT fitted to a corpus.
+  rerank_score_floor: 0.0
+  rerank_score_floor_note: >
+    OFF. Was 0.25, which discarded correctly-ranked first-place answers whose
+    absolute score was low because they were tables, lists or OCR text.
+  context_mode: section
+  parent_char_budget: 4000
+  source: core/config.py:216-232, services/retrieval.py:188
+
+chunking:
+  chunk_size_chars: 550
+  chunk_overlap_chars: 100
+  table_chunk_char_budget: 1600
+  table_max_rows_per_chunk: 30
+  source: core/config.py:42-45
+  nominal_understates_real_by: ~2x
+  measured_max_stored_chunk_chars: 2991
+  stacking_cause: >
+    Section-title prefixes and table row-groups stack on top of the nominal
+    budget, so a budget of N does not produce chunks of N.
+
+prompt:
+  measured_assembled_tokens:
+    min: 329
+    p25: 346
+    median: 5140
+    p75: 5265
+    p95: 5367
+    max: 5375
+  budget: 8192
+  median_pct_of_budget: 63
+  distribution_shape: bimodal
+  distribution_note: >
+    Two populations, not a tail. The abstention path returns one chunk or none
+    (p25=346); the answering path returns five (the 5140-5375 plateau). The
+    upper mode spans 4%, so prompt size is nearly CONSTANT on the answering
+    path — latency is predictable and not reducible by trimming outliers.
+  measured_by: scripts/prompt_distribution.py
+  budget_guard: core/token_budget.py:139
+  over_budget_count: 0
+
+vector_store:
+  engine: qdrant
+  vectors: named dense + sparse
+  quantization: int8
+  point_id_recipe: uuid5(source:etag:chunk_seq)
+  point_id_note: stable and idempotent; changing it orphans every existing point
+  cutover: upsert new etag, then delete stale
+  required_payload_indexes: [source, chunk_seq, section_title, etag]
+  index_invariant: >
+    Every field used in a FieldCondition must appear here, or the query
+    full-scans and degrades silently. Enforced by a static test.
+  source: integrations/qdrant_store.py
+
+corpus:
+  production_collection_points: 376
+  production_distinct_sources: 13
+  eval_corpus: eval/corpus/ (tier B, synthetic, 13 documents)
+  tier_a: ABSENT
+  tier_c: PLANNED, NEVER BUILT
+  section_title_coverage:
+    points_with: 162
+    points_total: 376
+    pct: 43
+    gap: >
+      214 points are PDF and carry none — per-page sections would be
+      singletons. Any filter on section_title silently excludes the majority.
+
+ocr:
+  engine: tesseract (apt, pinned by base-image digest)
+  language_data: vendored
+  tessdata_source: tesseract-ocr/tessdata
+  tessdata_tag: "4.1.0"
+  tessdata_prefix: /opt/tessdata
+  languages: [eng, fra]
+  checksums: backend/vendor/tessdata/MANIFEST.yaml
+  build_gate: api/verify_tessdata.py
+  system_copy_installed: false
+  system_copy_note: >
+    The per-language apt packages are deliberately NOT installed, so there is
+    no system copy for TESSDATA_PREFIX to be shadowed by.
+
+operational:
+  max_concurrent_queries: 4
+  max_concurrent_queries_note: >
+    A qwen3.5:4b number, NOT a system number. llama3.2:1b answers in seconds
+    and its crossing is far higher. This value and the generator move together.
+  llm_read_timeout_seconds: 300
+  measured_latency_crossing_concurrency: 8
+  ollama_memory_limit: 8g
+  ollama_memory_limit_basis: >
+    6g was 98% consumed (5.90 of 6.0 GiB) at cold model load while serving
+    concurrent requests — which every deploy and every recovery does.
+  measured_cold_start_seconds: 23.5
+  api_port_binding: 127.0.0.1
+  trust_proxy_identity: true
+
+caching:
+  answer_cache: keyed on normalized question + knobs + corpus version
+  prefix_cache: >
+    The inference server caches KV prefill separately. Disabling the answer
+    cache does NOT disable it. Two layers with different hit conditions,
+    neither instrumented for the other.
+  benchmark_warning: >
+    Never benchmark with a fixed prompt — any latency number taken that way is
+    a cache-hit number.
+
+evaluation:
+  modes: [retrieval, full]
+  retrieval_deterministic: true
+  retrieval_measured_spread: 0.0
+  retrieval_passes_confirmed: 6
+  full_mode_measured_spread: 0.0
+  full_mode_spread_is_evidence_of_stability: false
+  full_mode_qualifications:
+    - the pipeline genuinely did not vary
+    - the metric was too coarse to register it
+    - part of the work was served from the prefix cache
+  metrics: [recall_at_fetch, hit_at_k, mrr_at_k, false_abstention_rate, correct_abstention_rate]
+  primary_quality_metric: mrr_at_k
+  primary_quality_metric_note: >
+    NOT hit_at_k — returning five chunks instead of one raises it mechanically.
+  ci_regression_gate: INACTIVE
+  ci_regression_gate_reason: >
+    No baseline is both provenance-complete and drawn from real documents. The
+    job warns rather than passing silently.
+
+grounding:
+  enabled: false
+  flag: core/config.py:135
+  mechanism: quote-backed, verified by string match, no model judgement
+  implementation: services/grounding.py
+  why_disabled: >
+    On llama3.2:1b the required output contract collapsed answering from 13/15
+    to 2/15. The mechanism is correct and would work on a generator that can
+    satisfy an output contract.
+  known_gap: >
+    Does NOT catch a claim that quotes truthfully and reasons wrongly from the
+    quote. Pinned as a test so it cannot be quietly forgotten.
