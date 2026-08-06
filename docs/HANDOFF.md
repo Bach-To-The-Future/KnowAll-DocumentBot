@@ -28,7 +28,7 @@ It works on a candidate generator that has not been adopted. That decision is
 |---|---|---|
 | Abstention separated from relevance ranking | `services/retrieval.py:188` | One low bar decides "did retrieval return anything coherent"; ranking decides order. Previously one threshold did both and discarded correct answers. |
 | Malformed-generation guard | `services/query.py:459` | A reply that is only citation markers (`[1] [1][3]`) becomes the abstention message instead of an empty bubble. |
-| Query-rewrite drift guard | `services/query.py:171` | A rewritten follow-up whose meaning drifts from the original is discarded and the original used. |
+| Query-rewrite drift guard | `services/query.py:172` | A rewritten follow-up whose meaning drifts from the original is discarded and the original used. |
 | Prompt-injection containment | `services/passage_guard.py:96` | Retrieved passages are fenced, and fence/header/role/abstention-shaped text is stripped from their bodies. |
 | Embedding + context token budgets | `core/token_budget.py:116,139` | An oversized chunk fails ingest loudly; an oversized prompt drops lowest-ranked passages. |
 | Embedding-model identity enforcement | `core/model_identity.py:75` | Startup fails if the live model's digest differs from the pinned one. |
@@ -423,7 +423,7 @@ exceptions, empty output and gross length — but not meaning. A
 records-retention follow-up came back as *"What is the policy on disposing of
 hazardous waste?"*: fluent, correctly sized, past every check. Now guarded by
 cosine similarity to the original, in the same space retrieval scores in.
-`services/query.py:171`.
+`services/query.py:172`.
 
 **The generator emitted citation markers with no prose.** `[1] [1][3]` and
 nothing else — not an answer, not an abstention, and it passed every check
@@ -446,7 +446,7 @@ quietly *added* documents. Now driven by the collection.
 
 **`etag` was filtered on every ingest and never indexed**, so the staged
 cut-over full-scanned every time. Now indexed, with a static test enforcing the
-general rule. `integrations/qdrant_store.py:370`.
+general rule. `integrations/qdrant_store.py:376`.
 
 **Admission control admitted ~3× what the timeout tolerates.** Requests past
 the crossing were accepted only to time out — worse than the 503 the semaphore
@@ -523,11 +523,27 @@ correct chunk first in every case where it retrieves it at all (15/15).
 
 **Tier C corpus — planned and never built.** The idea was to use this
 repository's own documentation as a corpus with real prose and genuine
-near-duplicate content, to get competing candidates without human authorship.
-Its gating pre-test — *does `mrr_at_k` diverge from `hit_at_k` there* — was
-never run, so **whether the ordering experiments have anywhere to run remains
-unknown**. *Would take:* manifesting `docs/` the way the synthetic corpus is
-manifested, then that one measurement before authoring any questions.
+near-duplicate content across sessions, to get *competing* retrieval candidates
+without needing human-authored questions.
+
+The evidence for whether ordering experiments have anywhere to run points two
+ways, and both halves matter:
+
+| corpus | `mrr_at_k` vs `hit_at_k` | reading |
+|---|---|---|
+| synthetic tier B, 18 chunks | **identical** (0.682 / 0.682) | no ordering headroom — the reranker places the correct chunk first in every case it retrieves it at all, 15/15 |
+| ad-hoc 376-point collection, real prose | **diverged: 0.897 vs 0.952** | headroom exists; ranking is imperfect and therefore improvable |
+
+> So the hypothesis is **supported by the probe and never tested on anything
+> reproducible.** The divergence was seen on a collection with no manifest and
+> no checksums, so it cannot back a baseline or a regression gate. That is a
+> narrower gap than "untested": the question is not *whether* a corpus with
+> real prose produces competing candidates — one did — but whether a
+> *reproducible* one can be built that does.
+
+*Would take:* manifesting and checksumming `docs/` the way the synthetic corpus
+is, ingesting it into its own collection, and running that single divergence
+measurement before authoring any questions against it.
 
 **Five payload fields.** *Would take:* a reindex, which
 `scripts/alias_reindex.py` now makes safe.
@@ -546,18 +562,51 @@ PDF-specific answer, such as document title or heading detection.
 
 # 12. Open questions for a maintainer
 
-1. **Adopt the candidate generator, accept ungrounded output, or fund an
-   entailment model?** (§2 — the four consequences move together.)
-2. **If the incumbent is kept, may the concurrency limit and the 8 GiB
-   container limit be reverted?**
-3. **Is tier A obtainable?** Everything about real-document behaviour waits
-   on it.
-4. **Should `.helm` uploads be offered in the UI?** The extension works; the UI
-   does not list it. A product decision, not a code one.
-5. **May the five write-only payload fields be dropped on the next reindex?**
-6. **Is ~48 s per answer acceptable** if the candidate is adopted?
+Each is answerable without reading the rest of this document.
 
----
+**1. The generator: adopt `qwen3.5:4b`, accept ungrounded output, or fund an
+entailment model?**
+The shipped generator (`llama3.2:1b`) cannot be made to ground its answers —
+it ignores the instruction to decline when the context lacks an answer (0 of 4
+near-miss questions), cannot be steered into a yes/no verdict, and collapses
+from 13/15 to 2/15 answered when asked for structured output. The candidate
+fixes all three, at a cost of **8 GiB instead of 6, four concurrent queries
+instead of twenty, and ~48 s per answer instead of seconds**. Those four move
+together — picking the model without the limits gives a system that admits
+five times what its timeout tolerates. Nothing has been switched.
+
+**2. If the incumbent is kept, may the concurrency limit and the container
+limit be reverted?**
+`max_concurrent_queries` was lowered from 20 to 4, and the ollama container
+from 6 GiB to 8 GiB. Both are sized for the candidate. On the incumbent, 4
+needlessly throttles a model that answers in seconds, and 8 GiB
+over-provisions. Reverting is two config values.
+
+**3. Is a corpus of real, licensed documents obtainable?**
+Every threshold in this system is either principled-but-unfitted or fitted to a
+13-document synthetic corpus that is deliberately ~60% tables, spreadsheets and
+scanned pages. Real-world behaviour is currently *assumed*, not measured. The
+infrastructure to manifest, checksum, ingest and evaluate such a corpus already
+exists and is in use — only the documents are missing.
+
+**4. Should `.helm` uploads be offered in the UI?**
+The backend dispatches on file extension and handles `.helm` as plain text, so
+uploads of that type work today via the API. The UI's accept list does not
+include it. This is a product decision about whether the capability is
+intended, not a code question.
+
+**5. May five payload fields be dropped on the next reindex?**
+`key`, `chunk_index`, `total_chunks`, `content_type` and `image_count` are
+written to every stored point and never read — duplicated by other fields, or
+superseded. Removing them only takes effect on a reindex, so it is a data
+migration rather than a code change; it should ride along with a reindex that
+is happening anyway rather than forcing one.
+
+**6. Is ~48 seconds per answer acceptable?**
+That is the measured warm latency for a realistic question against the
+candidate generator on CPU, rising to ~62 s with two concurrent users. The
+incumbent answers in seconds but cannot ground its answers (question 1). There
+is no configuration that gives both on this hardware.
 
 # 13. Coverage and confidence
 
@@ -586,6 +635,35 @@ The rest of the frontend, the Playwright specs, `infra/`.
 | §9 evaluation | **High for retrieval, Medium for full mode** | retrieval determinism confirmed twice; full-mode variance carries three qualifications |
 | §10 findings | **High** for fixed items; **Medium** for the "incorrect as filed" reversals — they rest on single measurements |
 | §11 not-fixed | **Medium** — the effort estimates are judgement, not measurement |
+
+## Citation audit
+
+Twenty `file:line` citations in this document were resolved against the source
+after the work was complete. **Eighteen were correct; two had drifted** and are
+now fixed:
+
+| citation | claimed | actually pointed at |
+|---|---|---|
+| `services/query.py:171` | the rewrite drift guard | a blank line (guard is at `:172`) |
+| `integrations/qdrant_store.py:370` | the `etag` filter | `_collection_exists()` (filter is at `:376`) |
+
+Both drifted by a handful of lines from edits made after the text was written.
+A 10% drift rate over 86 commits is the reliability figure for `file:line`
+references here — treat them as a strong hint, not an address.
+
+## Setup walk
+
+The 10-minute section in §4 was walked against the repository rather than
+assumed. Checked and confirmed: `.env.example` carries all six placeholders the
+text describes; **every compose variable without a default is declared in
+`.env.example`** (14 of them — a missing one would silently become empty rather
+than erroring); the web port and service list match; and the placeholder
+refusal was exercised live, returning
+*"Refusing to start: API_KEY is still the shipped placeholder"*.
+
+Not exercised: a genuinely clean checkout on a machine with no images cached.
+The stack under test had warm images throughout, so first-run download time is
+unmeasured.
 
 ## Could not verify
 
