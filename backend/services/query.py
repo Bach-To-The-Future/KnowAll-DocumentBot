@@ -19,6 +19,7 @@ from core.config import Settings
 from core.exceptions import InvalidRequestError
 from core.interfaces import CacheStore, DenseEmbedder, LLMClient
 from core.telemetry import Telemetry, log_event, new_trace_id, timed
+from core.token_budget import fit_context_budget
 from models.schemas import QueryRequest, RetrievedChunk
 from services import grounding
 from services.memory import SessionMemory
@@ -235,7 +236,19 @@ class QueryService:
         for idx, chunk in enumerate(chunks, 1):
             page = f", Page: {chunk.page_number}" if chunk.page_number is not None else ""
             blocks.append(f"[{idx}] (Source: {chunk.source}{page})\n{chunk.text}")
-        context = "\n\n".join(blocks)
+
+        # Finding #3: DEGRADE GRACEFULLY. Over-budget context is truncated by
+        # the runtime from the FRONT, which is where the system prompt's
+        # grounding rules live — the model would lose rule 3 and keep every
+        # passage. Dropping the lowest-ranked passages instead is the opposite
+        # trade and the correct one. `chunks` arrives in rank order.
+        kept, _, dropped = fit_context_budget(SYSTEM_PROMPT, question, blocks)
+        if dropped:
+            logger.warning(
+                f"Prompt assembly dropped {dropped} of {len(blocks)} passages "
+                f"to stay inside the context budget."
+            )
+        context = "\n\n".join(kept)
         return f"Context:\n{context}\n\nQuestion:\n{question}"
 
     def _cache_knobs(self) -> dict[str, Any]:

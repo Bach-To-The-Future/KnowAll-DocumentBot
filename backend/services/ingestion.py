@@ -11,6 +11,7 @@ from core.config import Settings
 from core.exceptions import ExtractionError, InvalidRequestError
 from core.interfaces import CacheStore, ChunkLike, DenseEmbedder, JobStore, VectorStore
 from core.model_identity import verify_embedding_model
+from core.token_budget import check_embedding_budget
 from integrations.object_storage import MinIOObjectStorage
 from models.schemas import VectorRecord
 from services.query import CORPUS_VERSION_KEY
@@ -181,6 +182,14 @@ class IngestionService:
 
     def _embed_chunks(self, nodes: list[ChunkLike]) -> list[VectorRecord]:
         filtered = [n for n in nodes if n.text and n.text.strip()]
+        # Finding #19: FAIL LOUD before embedding. Ollama truncates at 2048
+        # tokens and returns HTTP 200 with a well-formed 768-dim vector built
+        # from a prefix — a wrong vector nothing downstream can detect. Raising
+        # here fails the ingest job, which is recoverable; a silently wrong
+        # vector in the index is not.
+        for node in filtered:
+            check_embedding_budget(
+                node.text, source=str(node.metadata.get("source", "chunk")))
         texts = [n.text for n in filtered]
         if not texts:
             return []
