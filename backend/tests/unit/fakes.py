@@ -11,6 +11,11 @@ class FakeVectorStore(VectorStore):
 
     def __init__(self) -> None:
         self.calls: list[tuple] = []
+        # Phase 2.6: tests set this to force the degraded path.
+        self.absent_indexes: list[str] = []
+
+    def missing_payload_indexes(self) -> list[str]:
+        return list(self.absent_indexes)
         self.by_seq: dict[int, str] = {}
         self.sections: dict[int, str] = {}
 

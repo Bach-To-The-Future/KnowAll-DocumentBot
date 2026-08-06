@@ -75,6 +75,17 @@ class VectorStore(Warmable, ABC):
         """Create collection/indexes; raise SchemaMigrationError on legacy schema."""
 
     @abstractmethod
+    def missing_payload_indexes(self) -> list[str]:
+        """Required payload indexes absent from the LIVE collection.
+
+        On the interface because readiness depends on it (phase 2.6): a missing
+        index makes filtered retrieval full-scan, which degrades silently as
+        the collection grows and which no other signal in the system reports.
+        Read back from the collection, never inferred from whether creation
+        raised — a collection can be recreated after a successful create.
+        """
+
+    @abstractmethod
     def upsert(self, records: Sequence[VectorRecord]) -> None: ...
 
     @abstractmethod

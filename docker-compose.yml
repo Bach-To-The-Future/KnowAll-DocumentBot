@@ -222,7 +222,16 @@ services:
       INGEST_BATCH_SIZE: ${INGEST_BATCH_SIZE:-256}
       MAX_CHUNKS_PER_DOCUMENT: ${MAX_CHUNKS_PER_DOCUMENT:-20000}
     ports:
-      - "8000:8000"
+      # Phase 2.5: bound to LOOPBACK, not 0.0.0.0. trust_proxy_identity=true
+      # means X-User-Id and X-Forwarded-For are believed from any caller, which
+      # is only safe when the authenticated Next.js tier is the sole ingress.
+      # Finding #37 sharpened this: at max_concurrent_queries=4, spoofing
+      # X-User-Id to evade per-identity rate limiting is enough to exhaust
+      # admission from ONE client.
+      # If you republish this on 0.0.0.0, set KNOWALL_API_PORT_PUBLISHED=1 and
+      # TRUST_PROXY_IDENTITY=false — core/startup_checks.py refuses the
+      # incoherent pair rather than trusting a comment to survive.
+      - "127.0.0.1:8000:8000"
     depends_on:
       redis:
         condition: service_healthy

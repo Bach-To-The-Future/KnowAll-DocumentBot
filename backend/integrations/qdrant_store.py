@@ -22,6 +22,13 @@ from models.schemas import ScoredChunk, VectorRecord
 
 logger = logging.getLogger(__name__)
 
+# The hot filter paths. Absence means a full scan, not an error.
+REQUIRED_PAYLOAD_INDEXES = (
+    ("source", qm.PayloadSchemaType.KEYWORD),
+    ("chunk_seq", qm.PayloadSchemaType.INTEGER),
+    ("section_title", qm.PayloadSchemaType.KEYWORD),
+)
+
 DENSE_VECTOR = "dense"
 SPARSE_VECTOR = "sparse"
 
@@ -114,19 +121,46 @@ class QdrantVectorStore(VectorStore):
 
     def _ensure_payload_indexes(self) -> None:
         """Indexes for the hot filter paths: source (selection, deletion),
-        chunk_seq (window expansion), section_title (parent retrieval)."""
+        chunk_seq (window expansion), section_title (parent retrieval).
+
+        Phase 2.6: failures are WARNING, not debug. A missing payload index is
+        not a cosmetic problem — Qdrant falls back to a full scan, so filtered
+        retrieval silently gets slower as the collection grows and nothing
+        surfaces until someone profiles it. DEBUG meant it never appeared in
+        any deployed log level.
+        """
         client = self._get_client()
-        for field_name, schema in (
-            ("source", qm.PayloadSchemaType.KEYWORD),
-            ("chunk_seq", qm.PayloadSchemaType.INTEGER),
-            ("section_title", qm.PayloadSchemaType.KEYWORD),
-        ):
+        for field_name, schema in REQUIRED_PAYLOAD_INDEXES:
             try:
                 client.create_payload_index(
                     collection_name=self._collection, field_name=field_name, field_schema=schema
                 )
             except Exception as e:
-                logger.debug(f"[Qdrant] Payload index '{field_name}' not (re)created: {e}")
+                # "already exists" is the common, benign case and Qdrant reports
+                # it as an error, so it is separated rather than shouted about.
+                if "already exists" in str(e).lower():
+                    logger.debug(f"[Qdrant] Payload index '{field_name}' already present.")
+                else:
+                    logger.warning(
+                        f"[Qdrant] Payload index '{field_name}' could not be created: {e}. "
+                        f"Filtered retrieval on this field will FULL SCAN, which "
+                        f"degrades silently as the collection grows."
+                    )
+
+    def missing_payload_indexes(self) -> list[str]:
+        """Which required indexes are absent. Empty list = healthy.
+
+        Read back from the collection rather than inferred from whether
+        creation raised: creation can succeed against a collection that is
+        later recreated, and the only honest check is what is there now.
+        """
+        try:
+            info = self._get_client().get_collection(self._collection)
+        except Exception as e:
+            logger.warning(f"[Qdrant] Could not read collection schema: {e}")
+            return []  # unknown is not the same as missing; readiness owns liveness
+        present = set((info.payload_schema or {}).keys())
+        return [name for name, _ in REQUIRED_PAYLOAD_INDEXES if name not in present]
 
     def ensure_ready(self) -> None:
         client = self._get_client()

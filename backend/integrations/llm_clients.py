@@ -39,6 +39,7 @@ class OllamaClient(LLMClient):
         self._timeout = httpx.Timeout(
             connect=5.0, read=settings.llm_read_timeout, write=10.0, pool=5.0
         )
+        self._enable_thinking = settings.llm_enable_thinking
         self._sync_client: httpx.Client | None = None
         self._async_client: httpx.AsyncClient | None = None
 
@@ -49,6 +50,26 @@ class OllamaClient(LLMClient):
             "stream": stream,
             "options": self._options,
         }
+        # Finding #34. Reasoning-capable models (qwen3.5 and later) emit their
+        # chain of thought by DEFAULT, into a separate `thinking` field. Two
+        # consequences, both measured:
+        #
+        #   * it silently empties the answer. With the 5-rule support prompt,
+        #     4383 chars of reasoning consumed num_predict=1024 exactly,
+        #     done_reason came back "length", and `response` was EMPTY. The
+        #     request looked successful and carried no answer.
+        #   * streaming shows the user nothing for the entire reasoning phase,
+        #     because astream() yields `response` and reasoning is not in it.
+        #     If the budget runs out first, the stream ends empty with no error.
+        #
+        # This is extractive QA over supplied passages, not a reasoning task:
+        # the same prompt with think=false produced the same answer in 15-40
+        # generated tokens instead of 300-1024.
+        #
+        # Ollama ignores an unknown key on models without the capability, so
+        # sending it unconditionally is safe.
+        if not self._enable_thinking:
+            payload["think"] = False
         if system_prompt:
             payload["system"] = system_prompt
         return payload

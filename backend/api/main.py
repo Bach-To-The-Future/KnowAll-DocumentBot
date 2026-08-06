@@ -14,6 +14,7 @@ from api.errors import register_exception_handlers
 from api.routers import documents, query, system
 from core.config import Settings, get_settings
 from core.model_identity import verify_embedding_model, verify_generation_model
+from core.startup_checks import run_all as run_startup_checks
 from integrations.llm_clients import ollama_model_available
 from services.container import build_container
 
@@ -57,6 +58,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # design: serving queries with a different model than the index was built
     # with degrades retrieval silently. Unreachable Ollama is NOT a mismatch —
     # that is the readiness check's job, above.
+    # Phases 2.5/2.7: configuration coherence, before anything binds.
+    run_startup_checks(settings)
     verify_embedding_model(settings, context="api startup")
     verify_generation_model(settings, context="api startup")
 
