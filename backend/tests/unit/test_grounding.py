@@ -137,3 +137,38 @@ def test_no_quotes_and_bad_quotes_are_distinguishable() -> None:
         'Answer [1].\nSUPPORT:\n[1] "invented text"', cites(RETENTION))
     assert silent.emitted_quotes is False and silent.reason == "no-quotes"
     assert wrong.emitted_quotes is True and wrong.reason == "quote-not-found"
+
+
+# --- the provenance-header case: D6's entire 1-in-15 failure ------------------
+
+def test_a_quote_that_includes_the_provenance_header_verifies() -> None:
+    """MEASURED, and it is a HARNESS defect, not a model one.
+
+    build_prompt renders each block as "[n] (Source: f.txt)\n<text>", and the
+    model asked to copy a sentence from passage n sometimes copies that header
+    too — faithfully, because it is part of what it was shown. Verifying only
+    against citation["text"] rejected an honest quote. Nondeterministic: the
+    same prompt included the header on 2 of 3 attempts.
+    """
+    citations = [{"index": 1, "text": RETENTION, "source": "test"}]
+    result = grounding.check(
+        f'Seven years [1].\nSUPPORT:\n[1] (Source: test) {RETENTION}', citations)
+    assert result.supported, result.unverified
+
+
+def test_the_header_form_also_carries_a_page_number() -> None:
+    citations = [{"index": 1, "text": RETENTION, "source": "f.pdf", "page_number": 3}]
+    result = grounding.check(
+        f'Seven years [1].\nSUPPORT:\n[1] (Source: f.pdf, Page: 3) {RETENTION}',
+        citations)
+    assert result.supported
+
+
+def test_a_fabricated_quote_is_STILL_rejected_with_the_header_form() -> None:
+    """The widened match must not become a fuzzy match: text that is not in
+    either form still fails."""
+    citations = [{"index": 1, "text": RETENTION, "source": "test"}]
+    result = grounding.check(
+        'Exceptions allowed [1].\nSUPPORT:\n[1] (Source: test) The records '
+        'officer may grant exceptions.', citations)
+    assert not result.supported and result.reason == "quote-not-found"

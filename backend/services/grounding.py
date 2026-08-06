@@ -90,10 +90,38 @@ def split_support(answer: str) -> tuple[str, dict[int, str]]:
     return "\n".join(lines[:header]).strip(), quotes
 
 
+def rendered_block(citation: dict) -> str:
+    """The passage AS THE MODEL SAW IT, provenance header included.
+
+    build_prompt() renders each context block as
+
+        [n] (Source: file.pdf, Page: 3)
+        <chunk text>
+
+    and the model, told to copy a sentence from passage n, sometimes copies
+    that header along with the text — faithfully, because it is part of what
+    was shown. Verifying only against `citation["text"]` then rejects a
+    perfectly honest quote.
+
+    MEASURED: this was D6's entire 1-in-15 failure. It is a harness defect, not
+    a model one, and not a normalization artefact either — the quote was
+    verbatim, against the wrong reference. Nondeterministic because the model
+    includes the header only sometimes.
+
+    Matching against BOTH forms keeps the check exact. No fuzzing, no
+    similarity threshold, no semantic judgement.
+    """
+    page = citation.get("page_number")
+    suffix = f", Page: {page}" if page is not None else ""
+    header = f"(Source: {citation.get('source', '')}{suffix})"
+    return f"{header}\n{citation.get('text', '')}"
+
+
 def check(answer: str, citations: list[dict]) -> GroundingResult:
     """Verify every cited passage carries a quote that actually occurs in it."""
     body, quotes = split_support(answer)
-    passages = {c["index"]: normalize(c.get("text", "")) for c in citations}
+    passages = {c["index"]: (normalize(c.get("text", "")),
+                             normalize(rendered_block(c))) for c in citations}
     cited = sorted({int(n) for n in _CITATION_RE.findall(body)})
 
     if not cited:
@@ -108,7 +136,8 @@ def check(answer: str, citations: list[dict]) -> GroundingResult:
         quote = quotes.get(index)
         if not quote:
             unverified.append((index, "<no quote supplied>"))
-        elif normalize(quote) not in passages.get(index, ""):
+        elif not any(normalize(quote) in form
+                     for form in passages.get(index, ("", ""))):
             unverified.append((index, quote))
 
     if unverified:
