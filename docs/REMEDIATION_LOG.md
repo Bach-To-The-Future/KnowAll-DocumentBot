@@ -73,6 +73,8 @@ Verdict key: **CONFIRMED** · **ALREADY FIXED** · **INCORRECT — actual state 
 | **32** | P2 | Degenerate generation: the model emits citation markers and nothing else (`[1] [1][3]`), which is neither an answer nor an abstention and reaches the user as an empty answer bubble | F31 generator test: 2 of 4 near-misses | **OPEN** — fix in 2.4 alongside finding #5's citation verification |
 | **33** | P2 | The abstention/concision rules cost real answers. Same 15 answerable questions: stripped 2-rule prompt answered **15/15**, the shipped 4-rule prompt **12/15** | ceiling control 2026-08-05 | **OPEN, FILED NOT FIXED** — changing the generation prompt needs R5 approval |
 | **35** | **P1** | Abstention is detected by VERBATIM comparison against `NO_ANSWER_MESSAGE`. A model that declines in its own words keeps its citations attached, is counted as a non-abstention in telemetry, and is cached as an answer | `query.py:371,443`; measured on qwen3.5:4b — "The provided context does not specify what happens to an incident after it escalates…" | **OPEN** — filed, not fixed |
+| **36** | P2 | Ollama caches the KV prefill, so a repeated or near-identical query costs far less than a novel one. Production latency therefore depends on query DIVERSITY, and it interacts with the answer cache: a query that misses the exact-match answer cache can still hit the prefix cache and return fast. Two caching layers, different hit conditions, neither instrumented for the other | ladder run 1 with a fixed prompt: 218.5s at concurrency 1 then 19.0s at concurrency 2 | **OPEN** — documented, not instrumented |
+| **37** | **P1** | `max_concurrent_queries=20` admits ~3x what `llm_read_timeout=300` tolerates. Measured worst-case full-context latency crosses 300s at concurrency ~6-7, so requests past the crossing are admitted only to time out — strictly worse than the 503 + `Retry-After` the semaphore already produces | concurrency ladder, cache-defeated: 48.3 / 91.4 / 140.9 / 182.1s at 1-4 | **OPEN** — config-only fix, lands regardless of generator |
 
 ## 0.3 Finding 15 — correction
 
@@ -2619,4 +2621,74 @@ phrasings, which reintroduces semantic judgement. The right shape:
 `services/grounding.py` already computes exactly this (`reason ==
 "no-citations"`), so the signal exists and is model-independent. It is
 currently only consulted when `require_support_quotes` is on.
+
+## F36 (P2) — two caching layers with different hit conditions, neither aware of the other
+Status: OPEN, documented not instrumented
+
+Found by a benchmark that produced a physically impossible shape:
+
+    ladder run 1, IDENTICAL prompt每 call
+      concurrency=1   218.5s
+      concurrency=2    19.0s      <- latency FELL as concurrency rose
+
+Latency cannot fall as contention rises. The cause is Ollama's **KV prefill
+cache**: every call used the same prompt, so calls 2..N reused the prefill.
+Re-run with a per-call nonce, the shape is monotone and sane
+(48.3 / 91.4 / 140.9 / 182.1s at concurrency 1-4).
+
+**This is a property of production, not just of the benchmark.** Two caches now
+sit in the path with *different hit conditions*:
+
+| layer | keyed on | effect |
+|---|---|---|
+| answer cache (`enable_answer_cache`) | exact match on the normalized question + knobs + corpus version | returns the stored answer, no LLM call |
+| Ollama prefix cache | the token prefix of the assembled prompt | skips prefill, still generates |
+
+A query that **misses** the answer cache can still **hit** the prefix cache and
+return several times faster than a novel one — because the assembled prompt
+shares its context blocks with a previous query even when the question differs.
+Neither layer is instrumented for the other's effect, so a latency measurement
+cannot currently attribute a fast response to either.
+
+Consequences to carry:
+
+- **Never benchmark with a fixed prompt.** Any latency number taken that way is
+  a cache-hit number. The stability probe now varies a nonce per call and says
+  so in the docstring.
+- Real-world latency depends on **query diversity**, which no metric records.
+  A corpus of similar questions will look far faster than a diverse one.
+- Disabling the answer cache for full-mode eval (already done, and required)
+  does **not** disable the prefix cache. Full-mode variance measured with
+  repeated questions is still partly measuring a cache.
+
+
+## F37 (P1) — admission control admits ~3x what the timeout tolerates
+Status: OPEN · config-only fix · independent of the generator decision
+
+    measured, cache-defeated, full-context prompts (~7,700 tokens)
+      concurrency 1    worst  48.3s
+      concurrency 2    worst  91.4s
+      concurrency 3    worst 140.9s
+      concurrency 4    worst 182.1s
+      => ~+45s per additional concurrent request, linear
+      => crosses llm_read_timeout=300s at concurrency ~6-7
+
+`max_concurrent_queries = 20` (`config.py:239`, the semaphore at
+`api/routers/query.py:31`).
+
+> The gate admits roughly **three times** what the timeout tolerates. Requests
+> past the crossing are admitted **only to time out** — which is strictly worse
+> than the `503 + Retry-After: 5` the semaphore already returns when full. A
+> client that is told to retry can; a client that waits five minutes for a
+> timeout cannot.
+
+**This is a config defect on any generator.** `llama3.2:1b` had enough latency
+headroom to mask it — at a few seconds per query, 20 concurrent never
+approached 300s. The mismatch was always there; a slower generator exposed it.
+Same shape as findings #27, #33 and #35: a mechanism that looked correct
+because the condition it mishandles never arose.
+
+The fix is a number, not code, and should land **regardless of which generator
+ships**. The value should come from a measured crossing rather than a fitted
+line, so the ladder is being extended to 8 before anything is changed.
 

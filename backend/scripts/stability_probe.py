@@ -306,11 +306,134 @@ def phase_pressure() -> None:
         print("  Fails cleanly with an error rather than silently. Acceptable.")
 
 
+
+# --------------------------------------------------------------------------
+
+FULL_CTX_CHUNK = ("Retention Policy Notes. Records are retained for seven years "
+                  "from the date of creation. Disposal requires written "
+                  "authorisation from the records officer. ") * 40
+
+
+def full_context_prompt(question: str = "How long are records retained?",
+                        nonce: str = "") -> str:
+    """~7,700 tokens: 5 chunks at parent_char_budget=4000, which is what
+    post-C3 assembles for EVERY real query.
+
+    `nonce` MUST vary per call. Ollama caches the KV prefill for a repeated
+    prompt, so issuing the identical prompt N times measures cache hits, not
+    inference. The first ladder run did exactly that and reported 19s at
+    concurrency 2 against 218s at concurrency 1 — a nonsensical shape that was
+    the cache, not the system. Real queries never repeat verbatim.
+    """
+    blocks = "\n\n".join(f"[{i}] (Source: doc{i}.txt)\n{FULL_CTX_CHUNK}"
+                         for i in range(1, 6))
+    return f"Context:\n{blocks}\n\nQuestion:\n{question}"
+
+
+def phase_fullload(minutes: int) -> None:
+    """The gap: sustained load AT FULL CONTEXT.
+
+    4.62 GiB single-shot and 5.54 GiB sustained-short do not compose
+    predictably — KV cache scales with context AND concurrency together, so
+    the product is the thing to measure, not either factor.
+
+    Latency is measured in the same run because it is plausibly the BINDING
+    constraint ahead of memory: 189.66s single-shot against
+    llm_read_timeout=300 leaves room for very little contention.
+    """
+    print(f"\n=== PHASE 6 - SUSTAINED FULL-CONTEXT LOAD ({minutes} min) ===")
+    sample = full_context_prompt()
+    print(f"  prompt chars={len(sample)} (~{len(sample) // 4} tokens est.)")
+    print("  each call gets a UNIQUE prompt: a repeated one hits Ollama's "
+          "prefix cache and measures the cache, not inference")
+    print("  timeout budget: llm_read_timeout=300s")
+    start_restarts = restarts()
+    sampler = Sampler(2.0)
+    sampler.start()
+    deadline = time.time() + minutes * 60
+    lat: list[float] = []
+    errors = empties = timeouts = rounds = 0
+    peak_concurrent_lat = 0.0
+
+    while time.time() < deadline:
+        rounds += 1
+        # 2 concurrent full-context queries: the realistic contended case.
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            results = [f.result() for f in [
+                pool.submit(gen, full_context_prompt(
+                    f"Round {rounds}-{j}: how long are records retained?",
+                    nonce=f"[r{rounds}-{j} {time.time():.6f}] "), 256)
+                for j in range(2)]]
+        for r in results:
+            if not r.get("ok"):
+                errors += 1
+            elif r.get("empty"):
+                empties += 1
+            if r.get("ok") and "s" in r:
+                lat.append(r["s"])
+                peak_concurrent_lat = max(peak_concurrent_lat, r["s"])
+                if r["s"] > 300:
+                    timeouts += 1
+        print(f"    round {rounds}: "
+              f"{[r.get('s') for r in results]}s  mem={mem_gib():.2f} GiB  "
+              f"errors={errors} empties={empties} over300s={timeouts}")
+
+    peak, median, n = sampler.stop()
+    print(f"\n  rounds={rounds}  errors={errors}  silent-empties={empties}")
+    print(f"  restarts: {start_restarts} -> {restarts()}   OOMKilled={oom_killed()}")
+    report("sustained FULL context", peak, median, n)
+    print(f"  CROSSES 6 GiB: {peak >= 6.0}")
+    if lat:
+        half = max(len(lat) // 2, 1)
+        first, second = lat[:half], lat[half:] or lat[:half]
+        print(f"  latency  median={statistics.median(lat):.1f}s  "
+              f"max={max(lat):.1f}s  worst-concurrent={peak_concurrent_lat:.1f}s")
+        print(f"  drift    first={statistics.median(first):.1f}s -> "
+              f"second={statistics.median(second):.1f}s")
+        print(f"  over llm_read_timeout=300s: {timeouts}/{len(lat)}")
+
+
+def phase_concurrency_ladder() -> None:
+    """At what concurrency does full-context latency cross llm_read_timeout?
+
+    Reported as the crossing LEVEL, because that is the operational limit —
+    max_concurrent_queries=20 is meaningless if 3 exceeds the timeout.
+    """
+    print("\n=== PHASE 7 — CONCURRENCY LADDER vs llm_read_timeout=300s ===")
+    crossed_at = None
+    for level in (1, 2, 3, 4):
+        sampler = Sampler(1.0)
+        sampler.start()
+        with ThreadPoolExecutor(max_workers=level) as pool:
+            results = [f.result() for f in [
+                pool.submit(gen, full_context_prompt(
+                    f"Query {level}-{j}: how long are records retained?",
+                    nonce=f"[run {level}-{j} {time.time():.6f}] "), 256)
+                for j in range(level)]]
+        peak, _, _ = sampler.stop()
+        lat = [r["s"] for r in results if r.get("ok") and "s" in r]
+        errs = sum(1 for r in results if not r.get("ok"))
+        empt = sum(1 for r in results if r.get("ok") and r.get("empty"))
+        worst = max(lat) if lat else -1
+        flag = ""
+        if worst > 300:
+            flag = "   <-- EXCEEDS llm_read_timeout"
+            crossed_at = crossed_at or level
+        print(f"  concurrency={level}  worst={worst:6.1f}s  "
+              f"median={statistics.median(lat) if lat else -1:6.1f}s  "
+              f"peak_mem={peak:.2f} GiB  errors={errs} empties={empt}{flag}")
+    print(f"\n  crosses the 300s timeout at concurrency: "
+          f"{crossed_at if crossed_at else 'not within 4'}")
+    print("  max_concurrent_queries=20 is the configured admission limit; the")
+    print("  measured limit is whatever this says.")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--phase", default="all",
                         choices=["all", "coexist", "ceiling", "sustained",
-                                 "coldstart", "pressure"])
+                                 "coldstart", "pressure", "fullload",
+                                 "ladder"])
     parser.add_argument("--minutes", type=int, default=30)
     args = parser.parse_args()
 
@@ -323,6 +446,10 @@ def main() -> int:
         phase_sustained(args.minutes)
     if args.phase in ("all", "pressure"):
         phase_pressure()
+    if args.phase in ("all", "fullload"):
+        phase_fullload(args.minutes)
+    if args.phase in ("all", "ladder"):
+        phase_concurrency_ladder()
     if args.phase in ("all", "coldstart"):
         phase_coldstart()
     return 0
