@@ -393,7 +393,7 @@ def phase_fullload(minutes: int) -> None:
         print(f"  over llm_read_timeout=300s: {timeouts}/{len(lat)}")
 
 
-def phase_concurrency_ladder() -> None:
+def phase_concurrency_ladder(levels: tuple[int, ...] = (1, 2, 3, 4)) -> None:
     """At what concurrency does full-context latency cross llm_read_timeout?
 
     Reported as the crossing LEVEL, because that is the operational limit —
@@ -401,7 +401,7 @@ def phase_concurrency_ladder() -> None:
     """
     print("\n=== PHASE 7 — CONCURRENCY LADDER vs llm_read_timeout=300s ===")
     crossed_at = None
-    for level in (1, 2, 3, 4):
+    for level in levels:
         sampler = Sampler(1.0)
         sampler.start()
         with ThreadPoolExecutor(max_workers=level) as pool:
@@ -423,7 +423,7 @@ def phase_concurrency_ladder() -> None:
               f"median={statistics.median(lat) if lat else -1:6.1f}s  "
               f"peak_mem={peak:.2f} GiB  errors={errs} empties={empt}{flag}")
     print(f"\n  crosses the 300s timeout at concurrency: "
-          f"{crossed_at if crossed_at else 'not within 4'}")
+          f"{crossed_at if crossed_at else f'not within {max(levels)}'}")
     print("  max_concurrent_queries=20 is the configured admission limit; the")
     print("  measured limit is whatever this says.")
 
@@ -435,6 +435,8 @@ def main() -> int:
                                  "coldstart", "pressure", "fullload",
                                  "ladder"])
     parser.add_argument("--minutes", type=int, default=30)
+    parser.add_argument("--levels", default="1,2,3,4",
+                        help="concurrency levels for the ladder")
     args = parser.parse_args()
 
     print(f"container limit: {LIMIT_GIB} GiB   baseline mem: {mem_gib():.2f} GiB")
@@ -449,7 +451,8 @@ def main() -> int:
     if args.phase in ("all", "fullload"):
         phase_fullload(args.minutes)
     if args.phase in ("all", "ladder"):
-        phase_concurrency_ladder()
+        phase_concurrency_ladder(
+            tuple(int(x) for x in args.levels.split(",")))
     if args.phase in ("all", "coldstart"):
         phase_coldstart()
     return 0

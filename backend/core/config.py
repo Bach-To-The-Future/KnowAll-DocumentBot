@@ -73,6 +73,13 @@ class Settings(BaseSettings):
     llm_temperature: float = 0.1
     llm_num_predict: int = 1024
     llm_read_timeout: int = 300  # CPU inference is slow, but never unbounded
+    # Finding #34 — reasoning-capable generators (qwen3.5+) emit chain-of-thought
+    # by default. MEASURED: with the support prompt, 4383 chars of reasoning
+    # consumed num_predict=1024, done_reason="length", and the answer was EMPTY.
+    # The same prompt with thinking off answered in 15-40 tokens instead of
+    # 300-1024. This workload is extractive QA over supplied passages, not a
+    # reasoning task. Off by default; set true to measure the difference.
+    llm_enable_thinking: bool = False
     openai_api_key: str | None = None
     # Finding #24 extended to the GENERATOR. Same moving-tag exposure the
     # embedding model had, different blast radius: embedding drift invalidates
@@ -229,7 +236,26 @@ class Settings(BaseSettings):
     rate_limit_per_minute: int = 30   # 0 = disabled, per identity per window
     max_upload_bytes: int = 100 * 1024 * 1024  # mirrored at the Next.js proxy
     # Admission control: hard ceiling on in-flight queries per replica.
-    max_concurrent_queries: int = 20
+    # Finding #37 — set from a MEASURED crossing, not a fitted line.
+    #
+    # Worst-case latency for a full-context prompt (~7,700 tokens), warm model,
+    # cache-defeated, against llm_read_timeout=300s:
+    #
+    #     concurrency  1     2     3     4     5     6     7     8
+    #     worst (s)   48.3  91.4 140.9 182.1 208.4 244.1 293.5 332.8
+    #                                                     ^^^^^ crosses at 8
+    #
+    # 20 admitted roughly THREE TIMES what the timeout tolerates: requests past
+    # the crossing were admitted only to time out, which is strictly worse than
+    # the 503 + Retry-After the semaphore already returns when full.
+    #
+    # 4 rather than 7: at 7 the worst admitted request takes 293.5s against a
+    # 300s budget — no margin for a larger prompt, a slower disk, or a cold
+    # model load. At 4 the worst is 182.1s, about 60% of budget.
+    #
+    # llama3.2:1b had enough headroom to mask this entirely. Re-measure with
+    # scripts/stability_probe.py --phase ladder if the generator changes.
+    max_concurrent_queries: int = 4
     # X-User-Id / X-Forwarded-For are only trusted because reaching the API
     # already requires a valid API key, held solely by the authenticated proxy.
     trust_proxy_identity: bool = True

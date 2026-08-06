@@ -280,3 +280,42 @@ def test_a_grounded_answer_is_returned_with_the_support_block_stripped():
     assert out == "Kept [1]."
     assert "SUPPORT" not in out
     assert "grounding_rejected" not in prepared.trace
+
+
+# --- finding #34: reasoning must not silently empty the answer ----------------
+
+def test_thinking_is_disabled_by_default_in_the_payload():
+    """MEASURED: with reasoning on and the support prompt, 4383 chars of chain
+    of thought consumed num_predict=1024, done_reason came back 'length', and
+    the response field was EMPTY. A successful-looking request with no answer."""
+    from integrations.llm_clients import OllamaClient
+    client = OllamaClient(Settings(_env_file=None))
+    payload = client._payload("q", stream=False, system_prompt="s")
+    assert payload["think"] is False
+
+
+def test_thinking_can_be_re_enabled_to_measure_the_difference():
+    from integrations.llm_clients import OllamaClient
+    client = OllamaClient(Settings(_env_file=None, llm_enable_thinking=True))
+    payload = client._payload("q", stream=False, system_prompt="s")
+    assert "think" not in payload  # absent = the model's own default
+
+
+def test_the_thinking_flag_is_sent_on_the_streaming_path_too():
+    """The streaming path is where reasoning hurts most: astream() yields only
+    `response`, so the user sees NOTHING for the whole reasoning phase, and an
+    exhausted budget ends the stream empty with no error."""
+    from integrations.llm_clients import OllamaClient
+    client = OllamaClient(Settings(_env_file=None))
+    assert client._payload("q", stream=True, system_prompt="s")["think"] is False
+
+
+def test_admission_limit_is_below_the_measured_timeout_crossing():
+    """Finding #37. Worst-case full-context latency crosses llm_read_timeout at
+    concurrency 8 (293.5s at 7, 332.8s at 8). Admitting more than the timeout
+    tolerates means excess requests are accepted only to time out -- strictly
+    worse than the 503 + Retry-After the semaphore already returns."""
+    s = Settings(_env_file=None)
+    assert s.max_concurrent_queries < 8, "admits past the measured crossing"
+    # And the margin is deliberate, not incidental.
+    assert s.max_concurrent_queries <= 5, "no headroom for a larger prompt"

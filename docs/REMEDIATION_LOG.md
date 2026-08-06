@@ -2692,3 +2692,71 @@ The fix is a number, not code, and should land **regardless of which generator
 ships**. The value should come from a measured crossing rather than a fitted
 line, so the ladder is being extended to 8 before anything is changed.
 
+## [Stability] Sustained full-context + the extended ladder — F37 fixed from measurement
+Status: DONE · `max_concurrent_queries` 20 -> 4
+
+### Sustained FULL-CONTEXT load, the gap the maintainer named
+
+30 min, 2 concurrent, ~7,743-token prompts, **unique per call** so no prefix
+cache:
+
+    rounds=22 (44 queries)  errors=0  silent-empties=0  restarts=0  OOMKilled=False
+    peak 4.90 GiB   headroom 1.10   CROSSES 6 GiB: False
+    latency median 62.1s  max 88.8s   drift 61.2s -> 62.4s over 30 min
+    over llm_read_timeout=300s: 0/44
+
+**Peak under sustained full context (4.90) is LOWER than sustained-short
+(5.54).** The two did not compose because they are driven by different
+variables:
+
+> **Concurrency drives memory; context length barely does.** The short phase
+> peaked higher because it ran 4 concurrent (3 queries + an embed); this ran 2.
+> KV growth from an 8k context is small against the model's resident footprint.
+
+The composition risk was overstated — by the maintainer in raising it and by me
+in accepting the framing.
+
+### Extended ladder, and a repeat of the cold-load artefact
+
+    concurrency=4  worst 332.7s  peak 5.90 GiB   <- CONTAMINATED, see below
+    concurrency=5  worst 208.4s  peak 5.54 GiB
+    concurrency=6  worst 244.1s  peak 5.46 GiB
+    concurrency=7  worst 293.5s  peak 5.56 GiB
+    concurrency=8  worst 332.8s  peak 5.57 GiB
+
+Level 4 ran **first**, from a baseline of 0.82 GiB — the model was not
+resident, so its 332.7s includes a cold load. Levels 5-8 are warm. The tell is
+the same one that exposed the prefix cache: latency **fell** from 4 to 5 as
+concurrency rose. Two cold-start contaminations in one investigation, both
+caught by the impossible-shape check rather than by discipline.
+
+Warm series, combining both ladder runs:
+
+    concurrency  1     2     3     4     5     6     7     8
+    worst (s)   48.3  91.4 140.9 182.1 208.4 244.1 293.5 332.8
+
+Monotone, roughly +40s per additional request. **Crosses llm_read_timeout=300s
+at concurrency 8**, with 7 at 293.5s — under, but with no margin at all.
+
+### F37 fixed: 20 -> 4
+
+Not 7. At 7 the worst admitted request takes **293.5s against a 300s budget** —
+nothing left for a larger prompt, a slower disk, or a cold model load, and the
+cold-load contamination above shows exactly how much a cold load costs. 4 gives
+182.1s, about 60% of budget.
+
+A test pins it below the crossing rather than pinning the literal number, so
+re-measuring on a different generator does not silently break it.
+
+### The real memory high-water mark: 5.90 GiB of 6.0
+
+Observed at **cold load + concurrency 4** — 98% of the limit, 0.10 GiB spare.
+Steady-state under high concurrency is ~5.6 GiB.
+
+> The worst realistic case is not steady load. It is a **cold model load while
+> already serving concurrent requests** — a restart under traffic. That is the
+> scenario closest to exhausting the container, and it is 0.10 GiB away.
+
+Nothing OOM'd in any phase, and no silent empties appeared under any pressure.
+But **8 GiB is the defensible limit for this generator**, not 6.
+
