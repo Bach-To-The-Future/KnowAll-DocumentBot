@@ -253,7 +253,10 @@ class Settings(BaseSettings):
     # 300s budget — no margin for a larger prompt, a slower disk, or a cold
     # model load. At 4 the worst is 182.1s, about 60% of budget.
     #
-    # llama3.2:1b had enough headroom to mask this entirely. Re-measure with
+    # 4 IS A qwen3.5:4b NUMBER, NOT A SYSTEM NUMBER. llama3.2:1b answers in
+    # seconds, so its crossing is far higher and 4 would needlessly throttle
+    # throughput. This value and the generator move TOGETHER -- see the
+    # generator package in docs/HANDOFF.md. Re-measure with
     # scripts/stability_probe.py --phase ladder if the generator changes.
     max_concurrent_queries: int = 4
     # X-User-Id / X-Forwarded-For are only trusted because reaching the API

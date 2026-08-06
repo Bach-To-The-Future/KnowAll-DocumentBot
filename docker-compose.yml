@@ -63,7 +63,15 @@ services:
     restart: unless-stopped
     deploy:
       resources:
-        limits: { memory: 6g }
+        # Finding #37 / stability suite. 6g was 98% consumed at the WORST
+        # REALISTIC case: a cold model load while already serving concurrent
+        # requests (5.90 GiB of 6.0, 0.10 GiB spare). That combination is not a
+        # stress test -- every deploy and every recovery hits it, so sizing to
+        # the ~5.6 GiB steady state makes the container tightest exactly when it
+        # is least stable.
+        # Applies to qwen3.5:4b (3.39 GB weights) + nomic-embed-text resident
+        # together. llama3.2:1b needs far less; see docs/HANDOFF.md.
+        limits: { memory: 8g }
     # No published ports: an exposed 11434 is an open inference endpoint.
     expose:
       - "11434"

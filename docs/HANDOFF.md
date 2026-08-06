@@ -86,6 +86,33 @@ understood**. The constraint is now demonstrated, and it *is* the model.
 **shipped off**. It would work against a generator that can satisfy its output
 contract, so option 3 makes it viable with no code change.
 
+### Option 3 is a PACKAGE, not a menu
+
+These four move together. A maintainer reading them as independent knobs could
+pick an incoherent combination — `qwen3.5:4b` at `max_concurrent_queries=20`
+admits five times what its timeout tolerates; `llama3.2:1b` at 4 needlessly
+throttles a generator that answers in seconds.
+
+| | incumbent `llama3.2:1b` | measured option `qwen3.5:4b` |
+|---|---|---|
+| ollama container limit | 6 GiB sufficient | **8 GiB** — 6 was 98% consumed at cold-load + concurrency 4 |
+| `max_concurrent_queries` | 20 (crossing far higher) | **4** — worst-case latency crosses the 300s timeout at 8 |
+| warm full-context latency | seconds | **~48s** single-shot, ~62s at concurrency 2 |
+| grounding | **cannot be enforced** (§1b) | rule 3 fires 3/4; D3 controls 5/5; D6 emission 15/15, kept 14/15 |
+| `require_support_quotes` | must stay off | **viable** — turn on after a full-pipeline measurement |
+
+**Nothing has been switched to the new generator.** `ollama_llm_model` still
+defaults to `llama3.2:1b`. What has changed unconditionally, because both are
+defects on any generator:
+
+- the Ollama runtime (0.9.3 → 0.32.5, pinned by digest) — required to pull the
+  candidate at all, and the embedding vectors survived it (deviation 1.292e-07)
+- `max_concurrent_queries` 20 → 4, and the **container limit 6 → 8 GiB**
+
+> Those last two are sized for `qwen3.5:4b`. **If the incumbent is kept, revert
+> both** — otherwise the system is throttled and over-provisioned for a model
+> it is not running.
+
 ---
 
 ## 1c. Standing rule, earned six times over
@@ -121,6 +148,30 @@ Four instances in this engagement:
 > about the trap does not exempt you from it.
 
 ---
+
+## 1d. Standing method: the impossible-shape check
+
+> **If a metric IMPROVES as load increases, the measurement is contaminated.
+> Stop and find the cache or the warm-up before reading the number.**
+
+It caught two distinct artefacts in one investigation, and neither was found by
+being careful — both were found by the shape being physically impossible:
+
+| observed | cause |
+|---|---|
+| concurrency 1 → 218.5s, concurrency 2 → **19.0s** | every call used an identical prompt; Ollama's KV **prefix cache** served the prefill |
+| concurrency 4 → 332.7s, concurrency 5 → **208.4s** | level 4 ran first from an unloaded model; its time included a **cold model load** |
+
+Both were corrected by varying a nonce per call and by discarding the first
+level respectively. The corrected series is monotone.
+
+Anyone benchmarking this system will hit the same class of artefact. Two
+concrete rules that follow:
+
+- **Never benchmark with a fixed prompt.** Any latency number taken that way is
+  a cache-hit number (finding #36).
+- **Discard the first measurement of any series**, or warm the model first. A
+  cold load costs more than the thing being measured.
 
 ## 2. What is measured, what is assumed
 
@@ -160,6 +211,21 @@ Therefore:
   consistent with any change at all to the LLM path.
 - C3 was implemented specifically to restore sensitivity. Re-measurement after
   C3 is the first number that can mean anything.
+
+**Third qualification, added after finding #36.** Disabling the answer cache for
+full-mode eval — which the harness enforces and refuses to run without — does
+**not** disable Ollama's KV **prefix cache**. Assembled prompts share their
+context blocks even across different questions, so repeated eval runs partially
+hit that cache. The measured 0.0 spread is therefore consistent with three
+separate explanations, not one:
+
+1. the pipeline genuinely did not vary,
+2. the metric was too coarse to register the variation (C3's finding), and
+3. part of the work was served from a cache nobody disabled.
+
+> **When full-mode variance is re-measured post-C3, control for it: restart the
+> ollama container between runs.** Otherwise the result needs three
+> qualifications and is worth less than the slow run costs.
 
 ---
 
