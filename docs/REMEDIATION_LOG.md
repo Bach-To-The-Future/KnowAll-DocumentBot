@@ -2840,3 +2840,26 @@ targets tier B and that collection holds the real documents. n=8 prompts from
 mismatched questions is not a distribution. Recorded so the number is not
 mistaken for a second data point.
 
+## [Phase 2.3] Containment cost — measured on BOTH generators, no cost detected
+
+                        containment OFF   containment ON
+    qwen3.5:4b              15/15             15/15
+    llama3.2:1b (ships)     13/15             15/15
+
+**No availability cost on either.** The maintainer's prediction held: F33
+measured that this model family tolerates instructions about *what to answer*
+and collapses on instructions about *output shape*, and a spotlighting clause
+sits on the tolerated side. Rule 5 cost 13/15 -> 2/15; the containment clause
+costs nothing.
+
+**The +2 on the incumbent is NOT an improvement.** F33 measured the same base
+prompt at 12/15 and 13/15 on separate runs, so 13 -> 15 sits inside the
+already-measured nondeterminism band for that model. Reporting it as a gain
+would be reading noise as signal — the honest claim is "no measurable cost",
+not "it helps".
+
+Measured on both because 2.3's effectiveness is generator-dependent like
+everything else in P-3, and **`llama3.2:1b` is still what ships**. A defence
+that held only on the candidate would have been worthless to the running
+system.
+
