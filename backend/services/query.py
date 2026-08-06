@@ -15,13 +15,13 @@ from typing import Any
 
 from starlette.concurrency import run_in_threadpool
 
-from core.config import Settings
+from core.config import Settings, get_settings
 from core.exceptions import InvalidRequestError
 from core.interfaces import CacheStore, DenseEmbedder, LLMClient
 from core.telemetry import Telemetry, log_event, new_trace_id, timed
 from core.token_budget import fit_context_budget
 from models.schemas import QueryRequest, RetrievedChunk
-from services import grounding
+from services import grounding, passage_guard
 from services.memory import SessionMemory
 from services.retrieval import RetrievalService
 
@@ -51,7 +51,14 @@ _SUPPORT_RULE = """
 passage you cited, one line of the form [n] followed by a sentence copied
 word-for-word from passage n. Copy exactly; do not paraphrase."""
 
-SYSTEM_PROMPT = _BASE_RULES
+# The containment clause is what makes the fence mean something; without it
+# the fence is decoration the model has no reason to respect. Both move with
+# the same flag, so disabling it reproduces pre-2.3 assembly exactly.
+#
+# NOT resolved at import time: that would freeze one Settings instance into a
+# module constant and make the flag untestable and un-overridable per request.
+SYSTEM_PROMPT = _BASE_RULES + passage_guard.CONTAINMENT_RULE
+SYSTEM_PROMPT_NO_CONTAINMENT = _BASE_RULES
 SYSTEM_PROMPT_WITH_SUPPORT = _BASE_RULES + _SUPPORT_RULE
 
 REWRITE_SYSTEM_PROMPT = (
@@ -230,19 +237,44 @@ class QueryService:
     # --- prompt & cache ---------------------------------------------------------
 
     @staticmethod
-    def build_prompt(question: str, chunks: list[RetrievedChunk]) -> str:
+    def build_prompt(question: str, chunks: list[RetrievedChunk],
+                     settings: Settings | None = None) -> str:
         # Per-chunk provenance tags ground citations in source/page.
-        blocks = []
+        settings = settings or get_settings()
+        blocks: list[str] = []
+        neutralised: dict[str, int] = {}
         for idx, chunk in enumerate(chunks, 1):
             page = f", Page: {chunk.page_number}" if chunk.page_number is not None else ""
-            blocks.append(f"[{idx}] (Source: {chunk.source}{page})\n{chunk.text}")
+            header = f"[{idx}] (Source: {chunk.source}{page})"
+            if settings.contain_untrusted_passages:
+                # Phase 2.3: fence + neutralise. The fence alone is decoration
+                # a poisoned chunk can close and step outside of; stripping
+                # fence-shaped text from the body is what makes it mean
+                # anything. See services/passage_guard.py.
+                block, counts = passage_guard.fence_passage(idx, header, chunk.text)
+                for key, n in counts.items():
+                    if n:
+                        neutralised[key] = neutralised.get(key, 0) + n
+                blocks.append(block)
+            else:
+                blocks.append(f"{header}\n{chunk.text}")
+
+        if neutralised:
+            # Counted and surfaced, never silently rewritten: a passage that
+            # trips several of these is itself a signal.
+            logger.warning(
+                f"Passage containment neutralised injection-shaped content: "
+                f"{neutralised}"
+            )
 
         # Finding #3: DEGRADE GRACEFULLY. Over-budget context is truncated by
         # the runtime from the FRONT, which is where the system prompt's
         # grounding rules live — the model would lose rule 3 and keep every
         # passage. Dropping the lowest-ranked passages instead is the opposite
         # trade and the correct one. `chunks` arrives in rank order.
-        kept, _, dropped = fit_context_budget(SYSTEM_PROMPT, question, blocks)
+        system = (SYSTEM_PROMPT if settings.contain_untrusted_passages
+                  else SYSTEM_PROMPT_NO_CONTAINMENT)
+        kept, _, dropped = fit_context_budget(system, question, blocks)
         if dropped:
             logger.warning(
                 f"Prompt assembly dropped {dropped} of {len(blocks)} passages "
@@ -388,8 +420,12 @@ class QueryService:
 
     @property
     def _system_prompt(self) -> str:
-        return (SYSTEM_PROMPT_WITH_SUPPORT if self._settings.require_support_quotes
-                else SYSTEM_PROMPT)
+        if self._settings.require_support_quotes:
+            return SYSTEM_PROMPT_WITH_SUPPORT
+        # 2.3's clause and 2.3's fences move together: with containment off,
+        # neither appears, and assembly is byte-identical to pre-2.3.
+        return (SYSTEM_PROMPT if self._settings.contain_untrusted_passages
+                else SYSTEM_PROMPT_NO_CONTAINMENT)
 
     def _check_grounding(self, answer: str, prepared: PreparedQuery) -> str:
         """P-3 D1+D6. Strip the SUPPORT block and verify every cited passage

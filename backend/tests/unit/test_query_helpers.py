@@ -230,14 +230,27 @@ def test_the_guard_is_reversible_at_zero():
 
 # --- P-3 D1+D6 wiring into QueryService ---------------------------------------
 
-def test_the_support_rule_is_the_only_prompt_change():
-    """R5 approval was scoped to exactly this. Nothing else in the generation
-    prompt may move."""
-    from services.query import SYSTEM_PROMPT, SYSTEM_PROMPT_WITH_SUPPORT
-    assert SYSTEM_PROMPT_WITH_SUPPORT.startswith(SYSTEM_PROMPT)
-    added = SYSTEM_PROMPT_WITH_SUPPORT[len(SYSTEM_PROMPT):]
-    assert added.strip().startswith("5.")
-    assert "SUPPORT:" in added and "word-for-word" in added
+def test_only_two_sanctioned_clauses_were_ever_added_to_the_prompt():
+    """Both prompt changes were separately R5-approved and scoped. This pins
+    that the base rules are untouched and that each variant adds exactly its
+    own clause -- so prompt creep fails CI rather than passing review."""
+    from services.query import (
+        SYSTEM_PROMPT,
+        SYSTEM_PROMPT_NO_CONTAINMENT,
+        SYSTEM_PROMPT_WITH_SUPPORT,
+    )
+    base = SYSTEM_PROMPT_NO_CONTAINMENT
+    assert base.rstrip().endswith("4. Be concise and factual.")
+
+    support = SYSTEM_PROMPT_WITH_SUPPORT[len(base):]
+    assert SYSTEM_PROMPT_WITH_SUPPORT.startswith(base)
+    assert support.strip().startswith("5.")
+    assert "SUPPORT:" in support and "word-for-word" in support
+
+    containment = SYSTEM_PROMPT[len(base):]
+    assert SYSTEM_PROMPT.startswith(base)
+    assert containment.strip().startswith("5.")
+    assert "<<<PASSAGE" in containment and "DATA supplied" in containment
 
 
 def test_grounding_ships_OFF():

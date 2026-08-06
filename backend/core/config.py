@@ -134,6 +134,17 @@ class Settings(BaseSettings):
     # make it viable without any code change.
     require_support_quotes: bool = False
 
+    # Phase 2.3 — prompt-injection containment for retrieved passages.
+    #
+    # Retrieved chunks are untrusted input concatenated into the same prompt
+    # that carries the grounding rules. Fences them and strips fence-shaped,
+    # header-shaped, role-shaped and abstention-shaped text from the body — a
+    # fence a poisoned chunk can close is decoration.
+    #
+    # REVERSIBLE: false reproduces pre-2.3 assembly byte-for-byte, including
+    # dropping the system-prompt clause that gives the fence meaning.
+    contain_untrusted_passages: bool = True
+
     # Finding #32 / P-3 candidate D5 — malformed-generation guard.
     #
     # Minimum SUBSTANTIVE characters (citation markers stripped) for a
