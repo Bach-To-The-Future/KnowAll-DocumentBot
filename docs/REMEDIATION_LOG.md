@@ -72,6 +72,7 @@ Verdict key: **CONFIRMED** · **ALREADY FIXED** · **INCORRECT — actual state 
 | **31** | **P1** | A cross-encoder scores TOPICAL RELEVANCE, not ANSWER PRESENCE. Near-miss unanswerable queries score 0.70-0.997 — higher than most correct answers — so no absolute score bar can separate "about your question" from "answers your question". The GENERATOR does not catch them either: 0 of 4, two fabrications with citations and two degenerate outputs | C3 run scores 0.6986 / 0.9557 / 0.9568 / 0.9968; full-mode generator test declined on 2/10, both being entries where retrieval returned nothing | **OPEN, P1 confirmed** — converges with #5 |
 | **32** | P2 | Degenerate generation: the model emits citation markers and nothing else (`[1] [1][3]`), which is neither an answer nor an abstention and reaches the user as an empty answer bubble | F31 generator test: 2 of 4 near-misses | **OPEN** — fix in 2.4 alongside finding #5's citation verification |
 | **33** | P2 | The abstention/concision rules cost real answers. Same 15 answerable questions: stripped 2-rule prompt answered **15/15**, the shipped 4-rule prompt **12/15** | ceiling control 2026-08-05 | **OPEN, FILED NOT FIXED** — changing the generation prompt needs R5 approval |
+| **35** | **P1** | Abstention is detected by VERBATIM comparison against `NO_ANSWER_MESSAGE`. A model that declines in its own words keeps its citations attached, is counted as a non-abstention in telemetry, and is cached as an answer | `query.py:371,443`; measured on qwen3.5:4b — "The provided context does not specify what happens to an incident after it escalates…" | **OPEN** — filed, not fixed |
 
 ## 0.3 Finding 15 — correction
 
@@ -2567,4 +2568,55 @@ marginally different floats under a different runtime. So:
 That is below any threshold in the system and changes nothing today. It is
 recorded because the next person to see `byte-exact: False` deserves to know it
 was measured and dismissed on evidence rather than overlooked.
+
+## F35 (P1) — abstention detected by exact string, so a self-worded decline leaks
+Status: OPEN, filed not fixed
+
+Flagged by the maintainer while reading F31's qwen3.5:4b result. Confirmed in
+the code, and it is worse than one call site.
+
+`NO_ANSWER_MESSAGE` is compared **verbatim** at three places:
+
+    query.py:443   "citations": prepared.citations if answer != NO_ANSWER_MESSAGE else []
+    query.py:371   abstained=(answer.strip() == NO_ANSWER_MESSAGE)
+    query.py:390   the grounding guard skips when answer == NO_ANSWER_MESSAGE
+    query.py:420   the malformed guard skips likewise
+
+The measured case, from the battery's F31 suite on qwen3.5:4b:
+
+> *"The provided context does not specify what happens to an incident after it
+> escalates to the duty supervisor; it only states that unresolved incidents
+> escalate after 72 hours."*
+
+That is a **correct decline**. It fails every comparison above. Consequences:
+
+1. **Citations stay attached** — the user sees a refusal presented with five
+   sources, implying the answer came from them.
+2. **Telemetry counts it as an answer**, so `abstained` under-reports exactly
+   the behaviour the system is trying to encourage.
+3. **It gets cached as an answer**, so the decline is replayed to later callers
+   with the same citations.
+
+### Why this stayed invisible until now
+
+On `llama3.2:1b` the model **never** declined (F31: 0 of 4), so the branch was
+unreachable in practice. The exact-match check is **load-bearing and
+model-dependent**: it worked only because the model it was written against
+could not follow rule 3 at all. A generator that declines *better* breaks it.
+
+That is the same shape as findings #27 and #33 — a mechanism that looked
+correct because the thing it guards against never occurred.
+
+### The fix is structural, not a longer string list
+Not implemented, because it changes user-visible behaviour and deserves a
+decision rather than a quiet edit. The wrong fix is fuzzy-matching decline
+phrasings, which reintroduces semantic judgement. The right shape:
+
+> **A decline is an answer that attributes nothing.** If the answer body
+> contains no citation markers, the citations array must be empty and the turn
+> counted as an abstention — regardless of wording.
+
+`services/grounding.py` already computes exactly this (`reason ==
+"no-citations"`), so the signal exists and is model-independent. It is
+currently only consulted when `require_support_quotes` is on.
 
