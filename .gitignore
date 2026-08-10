@@ -12,14 +12,22 @@
 *instructions.txt
 
 # --- Data / corpora (never commit source documents) ---
-*documents/
+# ANCHORED. `*documents/` matched at any depth and silently swallowed
+# frontend/src/app/documents/ and frontend/src/components/documents/ — source
+# files that were therefore never committed, so a clean clone could not build.
+# Only the ingest scratch directory is data; the rest are code.
+/backend/documents/
 !backend/eval/corpus/
 *minio_downloads/
 *.ipynb
 
 # --- Model weights & caches (fastembed / HuggingFace / ONNX) ---
 # These are baked into the image at build time; they must never enter git.
-models/
+# ANCHORED for the same reason: unanchored `models/` matched backend/models/,
+# the Pydantic schema package and a documented architectural layer, which was
+# therefore never committed. Weights on the host are covered by the extension
+# patterns below; the image cache lives at /opt/models, not in the repo.
+/models/
 .cache/huggingface/
 *.onnx
 *.safetensors
