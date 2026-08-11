@@ -9,6 +9,34 @@ each claim here. This document is the standing summary.
 
 ---
 
+# 0. Retractions
+
+An end-to-end audit (2026-08-10/11, `docs/FINAL_AUDIT.md`) tested this document
+against a clean clone and a running stack. Six claims were **wrong**, not stale.
+They are marked RETRACTED rather than silently updated, because a reader who saw
+an earlier version needs to know the claim was false — not merely what the
+number is now.
+
+| claim | status |
+|---|---|
+| "ruff / mypy clean across 38 source files" | **RETRACTED** — measured on a host venv missing `openai`, `qdrant_client`, `fastembed`, `arq`, `redis`, `minio`. With `ignore_missing_imports`, those collapse to `Any`. Host and container disagree with **zero overlap** (5 phantom errors, 6 real ones hidden). Separately, `.gitignore` hid `backend/models/` from ruff entirely. Never a statement about the codebase. Actual: **mypy 6 errors in 3 files**. |
+| "CI green" / "what CI enforces" | **RETRACTED** — CI had **never executed**. `origin/dock_contain` sat 69 commits behind at the `pre-refactor-streamlit` tag; nothing was pushed until this audit. Both static steps are also broken by their invocation: the mypy step exits 2 (`cannot read file 'backend/core'`), the ruff step reports 35 errors. "CI green" was a Phase 1 exit criterion that was never met. |
+| "Run it in 10 minutes" (§4) | **RETRACTED** — measured **~45 minutes**, of which **~43 is image build** (2576.7 s, with a *warm* layer cache; both backend images are 10 GB). The section never mentions a build step at all. |
+| `scripts/alias_reindex.py` as a working zero-downtime reindex | **RETRACTED** — **non-functional on any existing deployment.** The alias swap cannot complete where the collection was not bootstrapped alias-first. See §11 and FINAL_AUDIT P0-3. |
+| Snapshot-based backup in `RUNBOOK-reindex.md` | **RETRACTED** — Qdrant writes snapshots to `/qdrant/snapshots`, which is **not mounted**. Snapshots did not survive `docker compose down`. `--verify` could not detect this because it restores within the same container lifetime. Use a **volume-level** backup. |
+| Startup sweep "recovers" orphaned jobs | **RETRACTED** — it **fails** them, with `"Worker restarted while this job was in flight."` The user must re-upload. |
+
+Two further corrections that are amendments, not retractions:
+
+- The prior citation audit reported a **10% drift rate**. That was the rate in a
+  20-citation *sample* covering 80% of the population; the population rate was
+  **8%**. A second audit re-resolved **all 25** citations: 25/25 correct.
+- `max_concurrent_queries` — §2's "incumbent = 20" describes a configuration no
+  artifact produces. `core/config.py:272` and `.env.example:73` both ship **4**,
+  the candidate generator's number. See §2.
+
+---
+
 # 1. State of the system
 
 ## Is grounding on?
@@ -145,6 +173,35 @@ Changed because both are defects on **any** generator:
 Five practices. They matter more than the results, because the next person will
 be in the same position.
 
+## 0. The auditor reproduced the bug five times while auditing for it
+
+Stated first because it governs how to read everything else. The 2026-08-10/11
+audit was performed by the same author as the work it audited. **Five of its own
+checks were defective**, each in the exact way the thing under test was suspected
+of being:
+
+| # | the defective check | what it produced |
+|---|---|---|
+| 1 | ran `ruff`/`mypy` on a host venv missing 7 backend deps | 5 phantom errors, 6 real ones hidden — **zero overlap** with the truth |
+| 2 | piped `ruff` through `tail` and read `$?` | `EXIT=0` from a run that found 35 errors — the engagement's own `ruff \| tail` defect |
+| 3 | planted a second model snapshot in the huggingface tree, not the fastembed tree the checker reads | "guard did not fire" — the guard was fine |
+| 4 | forced the new gitignore guard by un-anchoring the patterns, with the files already committed | test passed; `git ls-files --others` reports only **untracked** files |
+| 5 | ran the eval without `-e QDRANT_COLLECTION=knowall_eval` | **every retrieval metric 0.0** — queried the production corpus against a tier-B golden set |
+
+**The fifth is the generalisation, and the danger is symmetric.** Failures 1–4
+produced results that looked *right*; failure 5 produced one that looked
+*catastrophically wrong*. A plausible catastrophe gets escalated exactly as
+readily as a plausible success gets banked — and 0.0 across every metric would
+have been reported as a total retrieval regression had it not been checked.
+
+Note the shape: **five omissions or misapplications of a documented environment
+variable or invocation, each yielding a legible but wrong number.** This is the
+same failure as the `OLLAMA_LLM_MODEL` omission earlier in the engagement. The
+defence is not that the operator remembers — it demonstrably does not, five
+times over. The defence is that **every recorded measurement states its full
+invocation**, so a wrong number can be traced to a wrong command instead of
+being attributed to the system.
+
 **1. Measure before tuning.** The original audit rated the rerank threshold's
 risk *mitigated*. An eval baseline showed retrieval found the correct chunk for
 **every** answerable question while only a third survived into the final answer
@@ -195,7 +252,19 @@ condition, not vigilance.
 
 ---
 
-# 4. Run it in 10 minutes
+# 4. Run it in about 45 minutes
+
+> **RETRACTED: "10 minutes."** Walked against a clean clone on 2026-08-10.
+> Measured **~45 min**, of which **~43 is `docker compose build`** (2576.7 s
+> with a *warm* Docker layer cache — a genuinely cold cache is slower). Both
+> backend images are 10 GB. The steps below never mentioned a build; `up -d`
+> performs it implicitly, and that is where the time goes.
+>
+> Also required but undocumented: on failure, compose reports only
+> `dependency failed to start: container knowall-api is unhealthy` — the real
+> reason needs `docker compose logs api`. And because every volume and
+> container carries a global `name:`, a second checkout on the same host
+> **silently reuses the first one's volumes and models**.
 
 ```sh
 cp .env.example .env
@@ -310,7 +379,7 @@ flowchart TD
 | the system prompt | `services/query.py:36` | **two clauses are separately sanctioned**; a test pins that nothing else was added |
 | extractors | `extraction/` | `section_title` matters — see the 43% coverage floor in §11 |
 | a Qdrant filter | `integrations/qdrant_store.py` | **the field must be in `REQUIRED_PAYLOAD_INDEXES`** — a static test enforces it |
-| the embedding model | anything | requires a reindex; use `scripts/alias_reindex.py` |
+| the embedding model | anything | requires a reindex. **NOT** `scripts/alias_reindex.py` — its swap is non-functional on existing deployments (§0). Use in-place `scripts/reindex.py`, **with downtime**. |
 
 ---
 
@@ -395,6 +464,18 @@ explanations:
 > less than the run costs.
 
 ## What CI enforces
+
+> **RETRACTED.** CI had **never executed** when this was written. The branch was
+> never pushed — `origin/dock_contain` sat 69 commits behind, at the
+> `pre-refactor-streamlit` tag. Everything below describes what the workflow
+> *files say*, not any observed run.
+>
+> Two steps additionally cannot pass as invoked. `ci.yml:84` runs mypy from
+> `backend/`, where `files = ["backend/core", …]` resolves to
+> `backend/backend/core` → `cannot read file`, **exit 2**, every time.
+> `ci.yml:82` passes `--config ../pyproject.toml`, which breaks `src` resolution
+> so first-party imports read as third-party → **35 errors**. Both pass under
+> auto-discovery, so the code is fine and the invocation is not.
 
 `.github/workflows/eval.yml`, two jobs. On PRs touching retrieval:
 corpus-manifest integrity, embedding-model identity, golden-set schema,
@@ -545,8 +626,19 @@ ways, and both halves matter:
 is, ingesting it into its own collection, and running that single divergence
 measurement before authoring any questions against it.
 
-**Five payload fields.** *Would take:* a reindex, which
-`scripts/alias_reindex.py` now makes safe.
+**Five payload fields.** *Would take:* a reindex.
+
+> **RETRACTED: "which `scripts/alias_reindex.py` now makes safe."** The alias
+> reindex is **non-functional on any existing deployment** — the swap cannot
+> complete where the collection was not bootstrapped alias-first (Qdrant refuses
+> an alias colliding with a real collection: `409 … already exists!`).
+>
+> **This invalidates the premise of several deferrals**, each of which was
+> deferred on the assumption that a safe reindex path existed: these five
+> payload-field drops, the cross-encoder enrichment in §11, and **any future
+> embedding-model, chunk-size or distance-metric change**. Re-examine all of
+> them against the path that actually works today: in-place
+> `scripts/reindex.py`, **with downtime**.
 
 **The abstention and concision prompt rules' cost.** ~2–3 answers in 15, and
 the abstention rule delivers none of its intended benefit on the shipped model.

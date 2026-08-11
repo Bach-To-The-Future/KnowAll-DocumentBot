@@ -16,9 +16,45 @@ three windows in which the collection is half-migrated.
 
 ## Before
 
-**1. Snapshot, and prove the snapshot restores.**
+**1. Back up the VOLUME, and prove it restores.**
+
+> **RETRACTED: the Qdrant-snapshot procedure below.** Qdrant writes snapshots to
+> `/qdrant/snapshots`. `docker-compose.yml:43` mounts only
+> `qdrant_data:/qdrant/storage`, so snapshots live in the container's writable
+> layer and are **destroyed by `docker compose down`** — or any recreate.
+> Verified 2026-08-10: a snapshot taken and `--verify`-confirmed was gone
+> minutes later.
+>
+> `--verify` cannot detect this, because it restores within the *same container
+> lifetime*. The check and the defect share the assumption that the container
+> persists. Every snapshot in this engagement — pre-reindex, pre-Ollama-upgrade,
+> pre-clean-room — was written to that unmounted path, so **every destructive
+> operation approved on the condition of a verified snapshot was approved
+> against a backup that could not survive a container recreate.**
 
 ```sh
+# Volume-level, survives `docker compose down`:
+docker run --rm -v qdrant_data:/src -v "$PWD/backup":/dst alpine \
+    tar czf /dst/qdrant_data.tgz -C /src .
+
+# Prove it: extract into a throwaway volume, boot a throwaway Qdrant on it,
+# and check the point count. Listing the tar is NOT a restore test.
+docker volume create restore_probe && \
+docker run --rm -v restore_probe:/dst -v "$PWD/backup":/b alpine \
+    tar xzf /b/qdrant_data.tgz -C /dst && \
+docker run -d --name restore-probe -e QDRANT__SERVICE__API_KEY=probe-key \
+    -v restore_probe:/qdrant/storage qdrant/qdrant:v1.14.1
+# then, from a sidecar (the qdrant image ships no curl):
+docker run --rm --network container:restore-probe curlimages/curl -s \
+    -H "api-key: probe-key" \
+    http://127.0.0.1:6333/collections/knowall_collection
+docker rm -f restore-probe && docker volume rm restore_probe
+```
+
+The superseded snapshot command, kept only so the retraction is legible:
+
+```sh
+# DO NOT RELY ON THIS — the artifact does not survive a container recreate.
 docker compose exec api python scripts/snapshot.py \
     --collection knowall_collection --verify
 ```
