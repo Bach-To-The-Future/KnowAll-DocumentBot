@@ -8,6 +8,7 @@ from typing import Any
 
 from core.config import Settings
 from core.interfaces import JobStore
+from integrations.redis_sync import as_list, as_text
 
 logger = logging.getLogger(__name__)
 
@@ -62,13 +63,13 @@ class RedisJobStore(JobStore):
 
     def update(self, job_id: str, **fields: Any) -> None:
         key = self._key(job_id)
-        raw = self._redis.get(key)
+        raw = as_text(self._redis.get(key))
         job = json.loads(raw) if raw else {"job_id": job_id}
         job.update(fields, updated_at=_now())
         self._redis.set(key, json.dumps(job, default=str), ex=JOB_TTL_SECONDS)
 
     def get(self, job_id: str) -> dict[str, Any] | None:
-        raw = self._redis.get(self._key(job_id))
+        raw = as_text(self._redis.get(self._key(job_id)))
         return json.loads(raw) if raw else None
 
     def list_jobs(self, limit: int = 1000) -> list[dict[str, Any]]:
@@ -81,7 +82,7 @@ class RedisJobStore(JobStore):
                 if len(keys) >= limit:
                     break
             for start in range(0, len(keys), 100):
-                for raw in self._redis.mget(keys[start:start + 100]):
+                for raw in as_list(self._redis.mget(keys[start:start + 100])):
                     if not raw:
                         continue
                     try:

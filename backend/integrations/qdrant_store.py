@@ -115,7 +115,8 @@ class QdrantVectorStore(VectorStore):
         # BM25 weights query terms differently from documents.
         model = self.get_sparse_model()
         with self._sparse_lock:
-            e = next(model.query_embed(text))
+            # query_embed returns an Iterable, not an Iterator: iter() first.
+            e = next(iter(model.query_embed(text)))
         return qm.SparseVector(indices=e.indices.tolist(), values=e.values.tolist())
 
     # --- schema -------------------------------------------------------------

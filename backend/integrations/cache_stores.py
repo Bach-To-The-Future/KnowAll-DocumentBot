@@ -11,6 +11,7 @@ from collections import OrderedDict, deque
 
 from core.config import Settings
 from core.interfaces import CacheStore
+from integrations.redis_sync import as_int, as_list
 
 logger = logging.getLogger(__name__)
 
@@ -113,7 +114,7 @@ class RedisCacheStore(CacheStore):
 
     def incr(self, key: str) -> int:
         try:
-            return int(self._redis.incr(key))
+            return as_int(self._redis.incr(key))
         except Exception as e:
             logger.warning(f"Cache incr failed ({e}).")
             return 0
@@ -147,7 +148,7 @@ class RedisCacheStore(CacheStore):
 
     def list_range(self, key: str, count: int) -> list[str]:
         try:
-            return list(self._redis.lrange(key, 0, count - 1))
+            return [str(x) for x in as_list(self._redis.lrange(key, 0, count - 1))]
         except Exception as e:
             logger.warning(f"Telemetry read failed ({e}); returning empty.")
             return []
