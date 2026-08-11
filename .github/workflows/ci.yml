@@ -169,8 +169,25 @@ jobs:
       - uses: actions/checkout@v4
       - name: Build backend image
         run: docker build -t knowall-api:ci -f backend/api/Dockerfile backend
+      # Pinned BY COMMIT SHA, not by tag — the same reasoning as the base-image
+      # digest pin (finding #25). A mutable tag on a third-party action is
+      # arbitrary code that can change under you between runs.
+      #
+      # This job had NEVER executed. It was written as `@0.28.0`, and that
+      # version has never existed: the tags carry a `v` prefix (`v0.28.0`). The
+      # runner failed at "Set up job" with
+      #     Unable to resolve action `aquasecurity/trivy-action@0.28.0`,
+      #     unable to find version `0.28.0`
+      # so the reference was wrong from the day it was written and nothing
+      # surfaced it, because the job is gated behind `needs: [frontend, backend]`
+      # and the backend job could never pass.
+      #
+      # v0.36.0 rather than the intended v0.28.0: there is no prior behaviour to
+      # preserve here (the job has no successful run to regress against), and
+      # older trivy-action releases commonly fail pulling the vulnerability DB.
+      # The `with:` inputs below are unchanged across these releases.
       - name: Trivy scan (fails on HIGH/CRITICAL)
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25  # v0.36.0
         with:
           image-ref: knowall-api:ci
           severity: HIGH,CRITICAL
