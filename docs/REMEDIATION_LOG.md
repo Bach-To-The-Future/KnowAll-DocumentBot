@@ -2968,3 +2968,80 @@ Moved into `api/verify_tessdata.py`, the pattern `api/verify_model_pins.py`
 already established. The lesson had been learned and written down, and I
 reintroduced it anyway by not applying it.
 
+---
+
+## [Phase R0] Make CI pass
+
+CI had failed all four times it had ever run. Both defects were invocation-level;
+no code was at fault. Sequenced so each commit left the tree green.
+
+**3e86de6 — the six real mypy errors, no ignores.**
+Five shared one cause: redis-py types every command as `Awaitable[Any] | Any`
+because one class serves both the sync and async API, and these stores build the
+sync client. `integrations/redis_sync.py` narrows once (`as_text`/`as_int`/
+`as_list`) with the reason stated, instead of six suppressions that record
+nothing and keep suppressing after the types change. The sixth was a latent bug,
+not a typing artifact: `next()` on `query_embed`'s **Iterable** (not Iterator) —
+correct only if the implementation happens to return a generator. Now
+`next(iter(...))`.
+Landed BEFORE the invocation fix deliberately: the two CI defects were stacked,
+ruff failed first and skipped mypy, so fixing the invocation while these stood
+would have moved the failure one step down.
+
+**dd0e860 — both static steps run from the repository root.**
+`ruff check --config ../pyproject.toml .` from `backend/` changed how
+`src = ["backend"]` resolves, reclassifying first-party imports as third-party:
+35 phantom I001 errors. `mypy --config-file ../pyproject.toml` from `backend/`
+resolved `files = ["backend/core", …]` against CWD → `backend/backend/core` →
+exit 2, every run. Verified by executing the workflow's exact commands from the
+workflow's exact directories before pushing.
+
+**b07450b — trivy-action pinned by commit SHA.**
+The security job had NEVER initialised: `@0.28.0` names a version that has never
+existed (tags carry a `v` prefix), so the runner failed at "Set up job". Two
+layers deep behind a job that could never pass, and cited in the audit as a
+working CI job. Same pattern as the alias script's unreachable branch, in build
+configuration. Filed as P1-8.
+
+**bdfaa88 — split the scan from the gate.**
+`security-scan` always runs, never gates, publishes the full CVE list as an
+artifact. `security-gate` fails only on HIGH/CRITICAL in application packages.
+A HIGH in a hash-pinned Python dependency is fixable in a commit; a HIGH in a
+transitive Debian package needs a base-image digest bump, which moves tesseract,
+OCR output, corpus content and every eval baseline. One boolean over both would
+either block on something no commit can fix or invite softening the gate on its
+first execution — which is how a gate becomes decorative.
+`scripts/summarise_trivy.py` is a file, not an inline heredoc, because the first
+attempt WAS a heredoc and it broke the workflow's YAML parse. Third time an
+embedded multi-line command has bitten this repository.
+
+### Result
+
+| job | before | after |
+|---|---|---|
+| Frontend build + types | success | success |
+| Backend lint + types + unit tests | **failure (Ruff)** | **success** |
+| E2E (compose + Playwright) | skipped, never run | **success** |
+| Image scan (report) | never initialised | **success**, publishes |
+| Dependency gate (application) | — | **failure — 22 real findings** |
+
+E2E and the image scan executed for the first time in this repository's history.
+
+### R0 exit: NOT fully met, for a real reason
+
+The gate is red because it found 22 HIGH findings in pinned Python dependencies
+(P1-9), all with upstream fixes. Two are not free bumps: `starlette` is pinned
+by `fastapi<0.47.0`, and `pillow` sits in the OCR path where output is corpus
+content. Both are R5 proposals, and `scripts/verify_ocr.py` makes the pillow
+question measurable rather than speculative.
+
+### A sixth self-check failure
+
+While chasing the CVE list I printed `exit=0` from a Trivy run that had reported
+`FATAL` — because the command was piped through `tail`, so `$?` reflected tail.
+That is the third occurrence of the `| tail` exit-code defect in this
+engagement, and the second I have committed myself while auditing for it. Two
+concurrent scans also deadlocked on Trivy's cache lock, and the local image scan
+timed out on a 10 GB image; the application-layer list was obtained by scanning
+the pinned lockfile directly, which is both faster and exactly the gate's scope.
+

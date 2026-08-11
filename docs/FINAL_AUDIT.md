@@ -383,6 +383,71 @@ incomplete.
 Only ollama is digest-pinned. `redis:7-alpine` is a **floating** tag. The
 reproducibility argument made for the base image applies equally.
 
+### P1-8 — `trivy-action@0.28.0` names a version that has never existed
+
+The security job was written `uses: aquasecurity/trivy-action@0.28.0`. The
+action's tags carry a `v` prefix, so that reference has never resolved. The
+runner failed at **"Set up job"** — before any step ran:
+
+```
+Unable to resolve action `aquasecurity/trivy-action@0.28.0`,
+unable to find version `0.28.0`
+```
+
+Wrong from the day it was written. Invisible because the job is gated behind
+`needs: [frontend, backend]` and the backend job could never pass, so the defect
+sat **two layers deep behind another failure** — and the original audit still
+cited it as one of the repository's CI jobs.
+
+**Same pattern as the alias script's unreachable branch** (P0-3), in build
+configuration rather than application code: reasoning written down, never
+executed, and cited as working. Belongs in the study guide's anti-pattern
+catalogue.
+
+*Fixed:* `b07450b` pins by commit SHA (F25 discipline). First successful
+initialisation immediately produced P1-9.
+
+### P1-9 — 22 HIGH findings in pinned Python dependencies
+
+The first scan this repository has ever completed. All 22 are **application
+layer** — pinned by hash in `api/requirements.txt` — and **all have upstream
+fixes**.
+
+| package | HIGH | have | fixed in | reachable? |
+|---|---|---|---|---|
+| `pillow` | **12** | 11.3.0 | 12.3.0 | **yes** — `extraction/pdf.py` `_ocr_page`, on user-uploaded scanned PDFs |
+| `python-multipart` | 3 | 0.0.20 | 0.0.30 | **yes** — parses every upload body (via FastAPI `UploadFile`) |
+| `starlette` | 3 | 0.46.2 | 1.3.1 | **yes** — imported in `api/main.py`, `api/dependencies.py`, `api/routers/documents.py`; every request |
+| `llama-index-core` | 1 | 0.12.43 | 0.13.0 | **yes** — `extraction/base.py`, `extraction/csv.py` |
+| `cryptography` | 1 | 49.0.0 | 50.0.0 | indirect — transitive, TLS |
+| `pyarrow` | 1 | 20.0.0 | 23.0.1 | weak — transitive under pandas; no direct import |
+
+Ranked by reachability rather than count: **pillow** and **python-multipart**
+both parse attacker-supplied bytes, which is a different risk class from
+`pyarrow` shipping in the image and never being imported. Trivy reports
+presence; this column is the part Trivy cannot tell you.
+
+**Two of the six are not a free bump, which is why this is a proposal:**
+
+1. **`starlette` is pinned by FastAPI.** `fastapi==0.115.14` requires
+   `starlette<0.47.0,>=0.40.0`. Reaching 1.3.1 means bumping FastAPI too — a
+   coupled framework-version change, not a dependency patch.
+2. **`pillow` sits in the OCR path.** `extraction/pdf.py:45` wraps a PyMuPDF
+   pixmap with `Image.frombytes("RGB", …)` and hands it to pytesseract. That is
+   a raw-buffer wrap rather than a format decode, so the risk of pixel drift is
+   *narrow* — but OCR output is corpus content, and corpus content moves every
+   stored vector and every eval baseline (finding #26).
+
+   **This is measurable rather than speculative**, which is exactly why F26
+   exists: `scripts/verify_ocr.py` asserts OCR content on the tier-B image-only
+   PDFs in EN and FR. Run it before and after; if output is byte-identical the
+   bump is free, and if it is not, that is a corpus change requiring a reindex.
+
+Also: the lockfile carries 2,703 hashes, so any bump means regenerating it
+wholesale rather than editing lines.
+
+*Not fixed.* R5 applies — proposed below.
+
 ### P3-1 — `next@15.3.3` carries CVE-2025-66478
 
 Reported by `npm ci`. Not investigated further.
