@@ -11,10 +11,28 @@ Field classes — deliberately small and explicit:
             the numbers are not on the same scale:
               corpus_manifest_sha256, embed_model, embed_model_digest,
               chunk_size, chunk_overlap, table_chunk_char_budget,
-              table_max_rows_per_chunk, eval_mode
+              table_max_rows_per_chunk, eval_mode,
+              n_answerable, n_unanswerable
             eval_mode is hard because retrieval-mode numbers (deterministic,
             no LLM) and full-mode numbers (rewrite + expansion in the loop)
             are not comparable quantities.
+
+            n_answerable / n_unanswerable are the SIZE OF THE DENOMINATOR each
+            rate is computed over. They are hard because a rate compared across
+            two populations is not a comparison at all.
+
+            WHY THEY EXIST. The 2026-08-10 audit compared COMPARABLE, exit 0,
+            with hit_at_k 0.682 -> 0.867 (+0.185) and mrr_at_k likewise — while
+            n_answerable fell 22 -> 15, because seven history-bearing
+            conversational entries had been retagged full-mode-only and are
+            skipped in retrieval mode. Those are plausibly the HARDER retrieval
+            cases, so removing them raised hit_at_k mechanically. The comparator
+            reported "no metric regressed" over a denominator that had changed
+            by a third.
+
+            That was the THIRD instance of one class in this engagement — a
+            metric improving because its population got easier, not because the
+            system did. See docs/HANDOFF.md section 1d.
 
   SEMANTIC  differ => COMPARABLE_WITH_SEMANTIC_DRIFT. Same scale, but these
             change WHAT GETS RETRIEVED, so a delta must not be attributed to
@@ -58,6 +76,10 @@ _HARD_BASE = (
     "table_chunk_char_budget",
     "table_max_rows_per_chunk",
     "eval_mode",
+    # The denominators. A rate compared across two populations is not a
+    # comparison — see the module docstring.
+    "n_answerable",
+    "n_unanswerable",
 )
 
 _SEMANTIC_BASE = (
@@ -128,12 +150,21 @@ def build(
     corpus_manifest_sha256: str,
     embed_model_digest: str | None,
     eval_mode: str,
+    n_answerable: int,
+    n_unanswerable: int,
 ) -> dict[str, Any]:
     """Assemble the tuple. Model revisions come from env baked into the image
     at build time (see api/Dockerfile), so they describe the container actually
-    running rather than the host's opinion of it."""
+    running rather than the host's opinion of it.
+
+    `n_answerable` / `n_unanswerable` are REQUIRED rather than defaulted: a
+    baseline recorded without them would compare as though the population had
+    never changed, which is the exact defect they exist to catch.
+    """
     return {
         "corpus_manifest_sha256": corpus_manifest_sha256,
+        "n_answerable": n_answerable,
+        "n_unanswerable": n_unanswerable,
         "embed_model": settings.embed_model,
         "embed_model_digest": embed_model_digest or "unpinned",
         "chunk_size": settings.chunk_size,

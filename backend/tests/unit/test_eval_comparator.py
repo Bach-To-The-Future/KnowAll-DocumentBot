@@ -30,6 +30,8 @@ def prov(**overrides: object) -> dict:
         "table_chunk_char_budget": 4000,
         "table_max_rows_per_chunk": 40,
         "eval_mode": RETRIEVAL_MODE,
+        "n_answerable": 22,
+        "n_unanswerable": 10,
         "reranker_model": "BAAI/bge-reranker-base",
         "retrieval_fetch_k": 40,
         "rerank_top_n": 5,
@@ -71,12 +73,45 @@ def test_identical_tuples_are_comparable() -> None:
         ("table_chunk_char_budget", 2000),
         ("table_max_rows_per_chunk", 10),
         ("eval_mode", FULL_MODE),
+        ("n_answerable", 15),
+        ("n_unanswerable", 3),
     ],
 )
 def test_hard_fields_refuse_comparison(field: str, value: object) -> None:
     verdict, hard, _, _ = classify(prov(), prov(**{field: value}))
     assert verdict == INCOMPARABLE
     assert [row[0] for row in hard] == [field]
+
+
+def test_the_real_audit_regression_is_now_INCOMPARABLE() -> None:
+    """The exact comparison that reported a false +0.185 improvement.
+
+    2026-08-10: baseline n_answerable=22 vs run n_answerable=15 (seven
+    history-bearing entries retagged full-mode-only and skipped in retrieval
+    mode). The comparator printed "OK - no metric regressed" and showed
+    hit_at_k 0.682 -> 0.867. Those are rates over different denominators.
+
+    Third instance of one class in this engagement: a metric improving because
+    its population got easier, not because the system did.
+    """
+    old = prov(n_answerable=22, n_unanswerable=10)
+    new = prov(n_answerable=15, n_unanswerable=10)
+    verdict, hard, _, _ = classify(old, new)
+    assert verdict == INCOMPARABLE
+    assert [row[0] for row in hard] == ["n_answerable"]
+
+
+def test_an_unchanged_population_still_compares() -> None:
+    """The control: the guard must not fire on every run.
+
+    Without this, making n_answerable hard could refuse every comparison and
+    still look like a working guard.
+    """
+    verdict, *_ = classify(
+        prov(n_answerable=22, n_unanswerable=10),
+        prov(n_answerable=22, n_unanswerable=10),
+    )
+    assert verdict == COMPARABLE
 
 
 @pytest.mark.parametrize(

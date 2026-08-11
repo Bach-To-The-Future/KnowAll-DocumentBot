@@ -234,6 +234,31 @@ Two artifacts, both caught by the shape being impossible rather than by care:
 So: **never benchmark with a fixed prompt**, and **discard the first
 measurement of any series**.
 
+**3b. Before reading a metric as improved, confirm its population did not
+change.** The general case of practice 3, and the one this engagement hit most
+often — **three distinct instances of a metric improving because its population
+got easier, not because the system did**:
+
+| observed | the population that changed |
+|---|---|
+| `correct_abstention_rate` **1.000** while the system abstained on **68%** of answerable questions | measured over unanswerable entries alone; a system that answers nothing scores perfectly |
+| latency **fell** as concurrency rose (218.5 s → 19.0 s; 332.7 s → 208.4 s) | the *work* got easier — prefix-cache hits, then a warm model |
+| `hit_at_k` **0.682 → 0.867 (+0.185)**, reported as no regression | `n_answerable` fell **22 → 15**; seven history-bearing entries were retagged full-mode-only and skipped. They are plausibly the harder cases, so removing them raised the rate mechanically |
+
+The first two were caught by an impossible shape. **The third was not** — the
+comparator, the instrument built to prevent exactly this, printed *"OK — no
+metric regressed."* Its drift detection covered every config knob and not the
+size of the denominator.
+
+Now fixed: `n_answerable` and `n_unanswerable` are **HARD** provenance fields
+(`eval/provenance.py`), so a golden-set composition change is **INCOMPARABLE**
+rather than a silent gain. Verified against the real case — the comparison that
+produced the +0.185 now exits 2 with `REFUSING TO DIFF`. A control test
+confirms an unchanged population still compares, so the guard cannot pass by
+refusing everything.
+
+**A rate is a fraction. Check the denominator before you read the numerator.**
+
 **4. Confirm a number measures the thing its threshold applies to.** A script
 reported *16 chunks over the 2048-token embedding limit*. The count was
 correct; the quantity was wrong — those were chunks *after context expansion*,

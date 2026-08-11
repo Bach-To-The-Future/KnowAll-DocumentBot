@@ -301,8 +301,27 @@ composition, so it printed "no metric regressed" over a changed denominator.
 This is the engagement's own standing practice — *a metric improving as the
 population shrinks means contamination* — violated by its own instrument.
 
-*Suggested fix:* treat `n_answerable`/`n_abstention` changes as hard-fail or
-semantic drift.
+**This is the third distinct instance of one class in this engagement — a
+metric improving because its population got easier, not because the system
+did.** The other two: `correct_abstention_rate` at 1.000 while abstaining on 68%
+of answerable questions, and latency *falling* as concurrency rose. The first
+two were caught by an impossible shape; this one was not, because the instrument
+built to catch it was looking only at config knobs. Named as a class in
+`HANDOFF.md §3.3b`.
+
+*FIXED during the audit* (the instrument's own defect; leaving it would mean the
+next person reads the same false improvement): `n_answerable` and
+`n_unanswerable` are now **HARD** provenance fields. Verified against the real
+case — the comparison that produced the +0.185 now exits 2:
+
+```
+REFUSING TO DIFF - these baselines do not measure the same thing:
+  n_answerable:   old: None   new: 15
+  n_unanswerable: old: None   new: 10
+```
+
+A control test confirms an unchanged population still compares, so the guard
+cannot pass by refusing everything.
 
 ### P1-6 — mypy is not clean; both CI static steps are broken
 

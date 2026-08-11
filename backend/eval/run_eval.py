@@ -510,6 +510,12 @@ def main() -> int:
             corpus_manifest_sha256=corpus_verify.manifest_hash(),
             embed_model_digest=embed_digest,
             eval_mode=args.mode,
+            # Counted from the rows ACTUALLY measured, not from the golden set
+            # on disk: full-mode-only entries are skipped in retrieval mode, and
+            # it is the measured denominator that has to match for a comparison
+            # to mean anything.
+            n_answerable=sum(1 for r in rows if r["kind"] == "answerable"),
+            n_unanswerable=sum(1 for r in rows if r["kind"] == "abstention"),
         ),
         "results": summary["results"],
         "slices": summary["slices"],
