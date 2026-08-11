@@ -78,10 +78,29 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r api/requirements.txt
           pip install ruff mypy
+      # Both static steps run from the REPOSITORY ROOT, overriding this job's
+      # `working-directory: backend`. That is not cosmetic — it is the whole
+      # defect, and it made CI fail every one of the first three times it ran.
+      #
+      # ruff:  `--config ../pyproject.toml` from backend/ changed how
+      #        `src = ["backend"]` resolves, so first-party imports (core,
+      #        services, …) were reclassified as third-party and every import
+      #        block read as mis-sorted: 35 phantom I001 errors. Auto-discovery
+      #        from the root walks up to the same pyproject.toml and resolves
+      #        `src` correctly.
+      # mypy:  `files = ["backend/core", …]` in pyproject.toml resolves against
+      #        the CURRENT WORKING DIRECTORY, not the config file's directory.
+      #        From backend/ that became backend/backend/core →
+      #        "cannot read file 'backend/core'", exit 2, every run.
+      #
+      # Neither was a code problem. Both were fixed by running them where their
+      # configuration expects to be run.
       - name: Ruff
-        run: ruff check --config ../pyproject.toml .
+        working-directory: ${{ github.workspace }}
+        run: ruff check .
       - name: Mypy
-        run: mypy --config-file ../pyproject.toml
+        working-directory: ${{ github.workspace }}
+        run: mypy --config-file pyproject.toml
       - name: Unit tests
         run: pytest -q
 
