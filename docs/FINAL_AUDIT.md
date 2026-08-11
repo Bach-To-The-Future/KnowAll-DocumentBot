@@ -440,11 +440,62 @@ invocation.**
 | A genuinely cold Docker image cache | ~20 GB of layers re-pulled; infeasible here. Build measured at warm-cache. |
 | First-run model pull times | Measured 1.5 s / 1.3 s — real writes to a fresh volume, but implausibly fast. Lower bound, not a general number. A metered link would settle it. |
 | Full-mode eval | Requires `ENABLE_ANSWER_CACHE=false` and an ollama restart between runs; not run. |
-| Whether CI passes | Now pushed and triggered for the first time. Read the run. |
+| Whether the mypy CI step fails as predicted | It is **skipped** — Ruff fails first and blocks it. Fixing the ruff invocation would expose it. |
+| E2E (Playwright) and Trivy scan | **Skipped** — both gated on the backend job. No compose/Playwright run has ever executed. |
 | Cross-lingual mechanism | Hypothesis only. Embed a known FR/EN pair and measure cosine. |
 | Tier A / tier C corpora | Do not exist. |
 | The alias swap after bootstrap | Untested — no deployment has an alias to swap. |
 | Token maxima on the production corpus | Measured on 3 documents (max 850/8192). Re-run `prompt_distribution.py` against the 376-point collection. |
+
+---
+
+# 8b. CI — the first verification not authored by the author
+
+Four runs exist, all triggered by this audit's pushes. **Three completed; all
+three failed.** Independently confirms Phase A.
+
+| run | Frontend | Backend | E2E | Security |
+|---|---|---|---|---|
+| `d9e86c3` | — | **failure** | skipped | skipped |
+| `f53554a` | — | **failure** | skipped | skipped |
+| `33a05d9` | success | **failure** | skipped | skipped |
+| `d4f16b5` | success | **failure** | skipped | skipped |
+
+Step level, newest run:
+
+```
+JOB Frontend build + types            -> success
+JOB Backend lint + types + unit tests -> failure
+     failure  Ruff
+     skipped  Mypy
+     skipped  Unit tests
+JOB E2E (compose + Playwright)        -> skipped
+JOB Image + dependency scan           -> skipped
+```
+
+**A1-c confirmed by a third party.** The Ruff step fails exactly as derived from
+executing the workflow's commands from the workflow's working directory.
+`ruff check --config ../pyproject.toml .` from `backend/` breaks `src`
+resolution, so first-party imports read as third-party. The code is clean under
+auto-discovery; the invocation is not.
+
+**A1-b is not yet confirmed — and that is itself a finding.** The Mypy step never
+ran: Ruff fails first and blocks it. So the mypy CWD defect (exit 2,
+`cannot read file 'backend/core'`) is still only established locally. Fixing the
+ruff invocation is what would expose it. The two defects are stacked, and only
+the first is visible.
+
+**Nothing has ever been verified beyond the backend job.** E2E — the compose
+stack plus Playwright — and the Trivy image scan are gated on it and have
+**never executed**, in the entire history of this repository.
+
+**The frontend job passing is a real result.** `npm ci` + `npm run build` (which
+runs tsc) succeed on a clean checkout — independently confirming both the
+frontend typecheck and that P0-1's remediation worked, since the build would fail
+without the documents page.
+
+Raw logs need authentication (403 unauthenticated); the step-level conclusions
+above come from the public API.
 
 ---
 
