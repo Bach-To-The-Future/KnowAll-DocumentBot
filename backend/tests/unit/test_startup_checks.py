@@ -11,6 +11,7 @@ import pytest
 from core.config import Settings
 from core.exceptions import ConfigurationError
 from core.startup_checks import (
+    BINDING_VAR,
     DEV_MODE_VALUE,
     DEV_MODE_VAR,
     check_auth_configured,
@@ -63,14 +64,21 @@ def test_dev_mode_allows_startup_and_shouts_about_it(monkeypatch, caplog) -> Non
 # --- 2.5: trusted proxy identity + a published port is incoherent ------------
 
 def test_trust_with_an_unpublished_port_is_fine(monkeypatch) -> None:
-    monkeypatch.delenv("KNOWALL_API_PORT_PUBLISHED", raising=False)
+    """R1.4 changed what "unpublished" means here.
+
+    This used to DELETE the variable and expect a pass, which is exactly the
+    defect: an absent declaration was read as "not published, therefore safe".
+    Loopback must now be DECLARED; the absent case is covered by
+    test_AN_ABSENT_DECLARATION_NOW_FAILS_CLOSED.
+    """
+    monkeypatch.setenv(BINDING_VAR, "loopback")
     check_proxy_trust_coherent(settings(trust_proxy_identity=True))
 
 
 def test_trust_with_a_PUBLISHED_port_refuses_to_start(monkeypatch) -> None:
     """The incoherent pair. With trust on, X-User-Id is believed from any
     caller; a published port means any local client is such a caller."""
-    monkeypatch.setenv("KNOWALL_API_PORT_PUBLISHED", "1")
+    monkeypatch.setenv(BINDING_VAR, "published")
     with pytest.raises(ConfigurationError, match="published"):
         check_proxy_trust_coherent(settings(trust_proxy_identity=True))
 
@@ -85,7 +93,7 @@ def test_the_error_names_the_F37_consequence(monkeypatch) -> None:
     change look like a regression; the mechanism is that the message quotes
     whatever ceiling is actually configured.
     """
-    monkeypatch.setenv("KNOWALL_API_PORT_PUBLISHED", "1")
+    monkeypatch.setenv(BINDING_VAR, "published")
     s = settings(trust_proxy_identity=True, max_concurrent_queries=3)
     with pytest.raises(ConfigurationError) as exc:
         check_proxy_trust_coherent(s)
@@ -94,7 +102,7 @@ def test_the_error_names_the_F37_consequence(monkeypatch) -> None:
 
 def test_publishing_the_port_is_allowed_when_trust_is_OFF(monkeypatch) -> None:
     """Either half fixes it — the check rejects the combination, not the port."""
-    monkeypatch.setenv("KNOWALL_API_PORT_PUBLISHED", "1")
+    monkeypatch.setenv(BINDING_VAR, "published")
     check_proxy_trust_coherent(settings(trust_proxy_identity=False))
 
 

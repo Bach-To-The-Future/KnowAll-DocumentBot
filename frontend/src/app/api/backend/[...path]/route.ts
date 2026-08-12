@@ -16,6 +16,10 @@
 import { NextRequest } from "next/server";
 
 import { verifySession } from "@/lib/auth";
+import {
+  PlaceholderCredentialError,
+  assertNoPlaceholderCredentials,
+} from "@/lib/startup-checks";
 
 export const dynamic = "force-dynamic";
 
@@ -36,6 +40,10 @@ const READ_ONLY: RegExp[] = [
   /^stats$/,
   /^ingest\/status\/[0-9a-fA-F-]+$/,
   /^health$/,
+  // R1.5. `ready` was absent, so no browser client could reach the readiness
+  // probe at all: it was unit-verified and never user-verified. It is a
+  // read-only diagnostic and belongs on the read surface beside `health`.
+  /^ready$/,
 ];
 
 // Write surface: mutates storage or the index — always the admin key.
@@ -55,6 +63,18 @@ async function proxy(
 ): Promise<Response> {
   // Cryptographic verification of the encrypted session cookie. No key is
   // attached to anything that fails here.
+  // R1.2. API_QUERY_KEY is the credential THIS proxy presents upstream; a
+  // placeholder here means the read-only privilege split is fictional.
+  try {
+    assertNoPlaceholderCredentials();
+  } catch (err) {
+    if (err instanceof PlaceholderCredentialError) {
+      console.error(err.message);
+      return Response.json({ detail: err.message }, { status: 500 });
+    }
+    throw err;
+  }
+
   const auth = await verifySession();
   if (!auth.ok) {
     return Response.json({ detail: "Unauthenticated." }, { status: 401 });

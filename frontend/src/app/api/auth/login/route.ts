@@ -8,6 +8,10 @@ import { randomUUID, timingSafeEqual } from "node:crypto";
 import { NextRequest } from "next/server";
 
 import { getSession } from "@/lib/auth";
+import {
+  PlaceholderCredentialError,
+  assertNoPlaceholderCredentials,
+} from "@/lib/startup-checks";
 
 export const dynamic = "force-dynamic";
 
@@ -25,6 +29,18 @@ function constantTimeEquals(a: string, b: string): boolean {
 }
 
 export async function POST(req: NextRequest) {
+  // R1.2. A published login password is worse than no password: it looks like
+  // authentication. Refuse before comparing anything.
+  try {
+    assertNoPlaceholderCredentials();
+  } catch (err) {
+    if (err instanceof PlaceholderCredentialError) {
+      console.error(err.message);
+      return Response.json({ detail: err.message }, { status: 500 });
+    }
+    throw err;
+  }
+
   const expected = process.env.AUTH_PASSWORD ?? "";
   if (!expected) {
     return Response.json(

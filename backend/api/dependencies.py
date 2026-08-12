@@ -17,7 +17,17 @@ from services.ingestion import IngestionService
 from services.query import QueryService
 
 # Read-only surface reachable with a scoped query key (API_QUERY_KEYS).
-READONLY_PATH_PREFIXES = ("/query", "/list_documents", "/ingest/status", "/stats")
+READONLY_PATH_PREFIXES = (
+    "/query",
+    "/list_documents",
+    "/ingest/status",
+    "/stats",
+    # R1.5 — read-only diagnostic. Must stay in step with READ_ONLY in
+    # frontend/src/app/api/backend/[...path]/route.ts, which enforces the same
+    # split independently. `/ready` was on neither list, so no browser client
+    # could reach the readiness probe at all.
+    "/ready",
+)
 
 
 def container_from_app(app: Starlette) -> ServiceContainer:

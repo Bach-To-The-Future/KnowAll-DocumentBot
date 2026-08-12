@@ -34,9 +34,10 @@ async def ready(response: Response,
             "status": "degraded",
             "missing_payload_indexes": missing,
             "detail": (
-                "Filtered retrieval on these fields will FULL SCAN. Recreate "
-                "them (restarting the API calls ensure_ready, which does) "
-                "before serving traffic."
+                "Filtered retrieval on these fields will FULL SCAN. "
+                "Restarting the API recreates them (api/main.py calls "
+                "ensure_ready at startup); an ingest or scripts/reindex.py "
+                "also does. Repair before serving traffic."
             ),
         }
     return {"status": "ready"}

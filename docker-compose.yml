@@ -250,6 +250,9 @@ services:
       # from cgroup and the host total from /proc/meminfo; these two are the
       # facts it cannot observe — what ollama was given, and what every service
       # declares in total. Keep them in step with the limits above.
+      # Describes the `ports:` mapping above. Required while
+      # TRUST_PROXY_IDENTITY is on; absence is treated as unsafe.
+      KNOWALL_API_PORT_BINDING: "loopback"
       KNOWALL_OLLAMA_MEMORY_GIB: "4"
       KNOWALL_DECLARED_MEMORY_GIB: "11.5"   # ollama 4 + worker 2 + api 5 + web 0.5
       MAX_QUEUE_DEPTH: ${MAX_QUEUE_DEPTH:-100}
@@ -262,9 +265,12 @@ services:
       # Finding #37 sharpened this: at max_concurrent_queries=4, spoofing
       # X-User-Id to evade per-identity rate limiting is enough to exhaust
       # admission from ONE client.
-      # If you republish this on 0.0.0.0, set KNOWALL_API_PORT_PUBLISHED=1 and
-      # TRUST_PROXY_IDENTITY=false — core/startup_checks.py refuses the
-      # incoherent pair rather than trusting a comment to survive.
+      # KNOWALL_API_PORT_BINDING below MUST describe this line. The API cannot
+      # observe host port publishing from inside its own network namespace
+      # (measured: the container's view is identical for 127.0.0.1:8000 and
+      # 0.0.0.0:8000), so the declaration is required and its ABSENCE fails
+      # closed. If you republish this on 0.0.0.0, set it to `published` — at
+      # which point startup refuses unless TRUST_PROXY_IDENTITY=false.
       - "127.0.0.1:8000:8000"
     depends_on:
       redis:

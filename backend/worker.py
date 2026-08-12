@@ -31,6 +31,7 @@ from arq.connections import RedisSettings
 
 from core.config import Settings, get_settings
 from core.model_identity import verify_embedding_model, verify_generation_model
+from core.startup_checks import run_all as run_startup_checks
 from core.tracing import new_trace_id
 from services.container import ServiceContainer, build_container
 
@@ -155,6 +156,12 @@ async def startup(ctx: dict) -> None:
     A SIGKILL mid-ingest leaves status="running" forever; without this the UI
     polls a job that no process is working on.
     """
+    # R1.2. The worker held the same datastore credentials as the API and ran
+    # NO configuration checks, so it started normally on the shipped placeholder
+    # set while the API refused. A guard covering one of two entry points is a
+    # guard with a hole — and this is the entry point that writes to the index.
+    run_startup_checks(_settings, entry_point="worker")
+
     # Same identity gate as the API: a worker that embeds documents with a
     # drifted model would poison the index one job at a time.
     verify_embedding_model(_settings, context="worker startup")

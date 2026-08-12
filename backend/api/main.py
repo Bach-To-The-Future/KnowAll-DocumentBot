@@ -68,6 +68,30 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # the Warmable interface, so these calls are type-checked rather than
     # resolved through an `Any` attribute on app.state.
     container = container_from_app(app)
+
+    # R1.5. /ready's degraded message told operators that "restarting the API
+    # calls ensure_ready, which does [recreate the indexes]". It did not:
+    # `ensure_ready` appeared NOWHERE in the API startup path, and its only
+    # occurrence anywhere under api/ was inside that very string. Restarting
+    # left /ready at 503; an INGEST was what actually repaired it.
+    #
+    # Fixed by making the promise true rather than by softening the wording —
+    # the alternative is guidance that describes a mechanism which does not
+    # exist, which is the defect this whole phase is about.
+    #
+    # Idempotent: on an existing collection it only (re)creates missing payload
+    # indexes; "already exists" is the common, benign case. It is deliberately
+    # non-fatal — a datastore hiccup should not stop the API booting, and the
+    # readiness probe still reports the degraded state if this did not succeed.
+    try:
+        await run_in_threadpool(container.vector_store.ensure_ready)
+    except Exception as e:
+        logger.warning(
+            f"Could not ensure payload indexes at startup: {e}. "
+            f"/ready will report the collection as degraded until an ingest or "
+            f"scripts/reindex.py repairs it."
+        )
+
     try:
         await run_in_threadpool(container.vector_store.warm)
         await run_in_threadpool(container.reranker.warm)
