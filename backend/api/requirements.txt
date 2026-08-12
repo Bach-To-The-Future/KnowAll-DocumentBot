@@ -1114,9 +1114,9 @@ joblib==1.5.3 \
     --hash=sha256:5fc3c5039fc5ca8c0276333a188bbd59d6b7ab37fe6632daa76bc7f9ec18e713 \
     --hash=sha256:8561a3269e6801106863fd0d6d84bb737be9e7631e33aaed3fb9ce5953688da3
     # via nltk
-llama-index-core==0.12.43 \
-    --hash=sha256:155a8602010fb7d8538e6b52b6a3e1fdc029ee02e71a70d2b0a2278de22c8fa9 \
-    --hash=sha256:964e24969296abe9bdc662b5b185c630cc61e627f90d4194b885a707577b5b48
+llama-index-core==0.13.6 \
+    --hash=sha256:67bec3c06a8105cd82d83db0f8c3122f4e4d8a4b9c7a2768cced6a2686ddb331 \
+    --hash=sha256:80315a6bd1f9804f48c1870eff1a0315bf9fe5a413747d53eb88a8ebb2602b97
     # via -r api/requirements.in
 llama-index-instrumentation==0.5.0 \
     --hash=sha256:aaab83cddd9dd434278891012d8995f47a3bc7ed1736a371db90965348c56a21 \
@@ -1919,7 +1919,9 @@ pillow==11.3.0 \
 platformdirs==4.11.0 \
     --hash=sha256:0555d18370482847566ffabcaa53ad7c6c1c29f195989ae1ed634a05f76ea1e0 \
     --hash=sha256:360ccded2b7fce0af0ff80cc8f5942a1c5d99b0e856033acb030bfc634709e74
-    # via banks
+    # via
+    #   banks
+    #   llama-index-core
 pluggy==1.6.0 \
     --hash=sha256:7dcc130b76258d33b90f61b658791dede3486c3e6bfb003ee5c9bfb396dd22f3 \
     --hash=sha256:e920276dd6813095e9377c0bc5566d94c932c33b27a3e3945d8389c374dd4746

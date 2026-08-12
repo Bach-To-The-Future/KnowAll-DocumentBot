@@ -28,7 +28,12 @@ openpyxl==3.1.5
 # core only: we use Document + SentenceSplitter, not the full meta-package.
 # workflows must stay <2: core 0.12.x imports workflows.checkpointer, which
 # the 2.x line removed (core's own dependency spec is unbounded).
-llama-index-core==0.12.43
+# Bumped from 0.12.43 for CVE-2025-7647 (HIGH). This moves SentenceSplitter,
+# which decides chunk boundaries, so it was gated on a byte-level chunking
+# comparison rather than a version check: all 13 tier-B documents produce
+# identical chunk counts, lengths and sha256 before and after. Had any
+# boundary moved, that would be a corpus change requiring a reindex (R5).
+llama-index-core==0.13.6
 llama-index-workflows<2
 python-pptx==0.6.23
 
