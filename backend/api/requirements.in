@@ -5,7 +5,7 @@ boto3==1.38.31
 # Data manipulation
 numpy==2.2.6
 pandas==2.2.3
-pyarrow==20.0.0
+pyarrow==23.0.1  # CVE-2026-25087 (HIGH)
 
 # Vector DB
 qdrant-client==1.14.3
@@ -15,6 +15,13 @@ pymupdf==1.26.0
 pdfplumber==0.11.6
 # OCR for scanned PDFs (tesseract binary installed in the Dockerfile)
 pytesseract==0.3.13
+# BLOCKED at <12 by fastembed 0.7.1, which requires pillow>=10.3.0,<12.0.0.
+# That is what this upper bound was always for; it is not a conservative
+# guess. 11.3.0 carries 12 HIGH CVEs fixed in 12.3.0, so reaching them
+# requires bumping FASTEMBED — the BM25 sparse encoder and the ONNX
+# cross-encoder reranker, whose model revisions are pinned in the Dockerfile
+# and whose scores gate every eval baseline. That is a retrieval-quality
+# change under R5, not a dependency patch. See docs/FINAL_AUDIT.md P1-9.
 pillow>=10,<12
 python-docx==1.2.0
 openpyxl==3.1.5
@@ -28,7 +35,7 @@ python-pptx==0.6.23
 # Web frameworks & configuration
 fastapi==0.115.14
 uvicorn==0.35.0
-python-multipart==0.0.20
+python-multipart==0.0.30  # CVE-2026-24486 / -42561 / -53539 (HIGH)
 pydantic-settings>=2.6,<3
 # Async HTTP for the LLM generation path (streaming without threadpool pinning)
 httpx>=0.27,<0.29
@@ -39,6 +46,11 @@ arq>=0.26,<0.27
 # Embedding & retrieval
 openai==1.97.1
 fastembed==0.7.1  # BM25 sparse vectors + ONNX cross-encoder reranker (CPU)
+
+# --- Security floors for TRANSITIVE dependencies ------------------------
+# Not imported by this codebase; declared only to raise the resolver's
+# floor past a known HIGH. Remove if a direct dependency ever pins higher.
+cryptography>=50.0.0  # CVE-2026-69247 (HIGH), reached transitively via TLS
 
 # Optional utility
 chardet==5.2.0
