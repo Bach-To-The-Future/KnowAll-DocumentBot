@@ -11,6 +11,11 @@ from __future__ import annotations
 import logging
 import os
 
+from core.admission_limits import (
+    check_admission_fits_memory,
+    check_declared_memory_fits_host,
+    check_generator_memory_allocation,
+)
 from core.config import Settings
 from core.exceptions import ConfigurationError
 
@@ -76,10 +81,12 @@ def check_proxy_trust_coherent(settings: Settings) -> None:
     authenticated Next.js tier. If the container publishes 8000 to the host,
     any local client reaches it directly and can name itself.
 
-    Finding #37 sharpened this. With `max_concurrent_queries` now 4, spoofing
-    `X-User-Id` to evade per-identity rate limiting is cheap enough to exhaust
-    the admission gate from a single client — the blast radius went from
-    "unfair share" to "denial of service".
+    The admission gate sharpens this. The ceiling is small — measured at 1 for
+    the shipped generator (core/admission_limits.py) — so spoofing `X-User-Id`
+    to evade per-identity rate limiting is cheap enough to exhaust admission
+    from a single client: the blast radius goes from "unfair share" to "denial
+    of service". The lower the ceiling, the cheaper the attack, which is why
+    this check quotes the configured value rather than a fixed number.
     """
     if not settings.trust_proxy_identity:
         return
@@ -107,3 +114,8 @@ def check_proxy_trust_coherent(settings: Settings) -> None:
 def run_all(settings: Settings) -> None:
     check_auth_configured(settings)
     check_proxy_trust_coherent(settings)
+    # R1.1 — the admission ceiling, the generator's memory allocation and the
+    # host total. Prose held the first two couplings and prose failed twice.
+    check_admission_fits_memory(settings)
+    check_generator_memory_allocation(settings)
+    check_declared_memory_fits_host()

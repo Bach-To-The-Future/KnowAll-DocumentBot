@@ -76,13 +76,20 @@ def test_trust_with_a_PUBLISHED_port_refuses_to_start(monkeypatch) -> None:
 
 
 def test_the_error_names_the_F37_consequence(monkeypatch) -> None:
-    """Finding #37 sharpened this: at max_concurrent_queries=4, spoofing
-    X-User-Id to evade per-identity rate limiting exhausts admission from a
-    single client. The message has to say that or it reads as pedantry."""
+    """Spoofing X-User-Id to evade per-identity rate limiting can exhaust
+    admission from a single client. The message has to say that, and it has to
+    name the CONFIGURED ceiling, or it reads as pedantry.
+
+    This asserted the literal `max_concurrent_queries=4` until F37 was retracted
+    and the measured ceiling became 1. Pinning the number made a legitimate
+    change look like a regression; the mechanism is that the message quotes
+    whatever ceiling is actually configured.
+    """
     monkeypatch.setenv("KNOWALL_API_PORT_PUBLISHED", "1")
+    s = settings(trust_proxy_identity=True, max_concurrent_queries=3)
     with pytest.raises(ConfigurationError) as exc:
-        check_proxy_trust_coherent(settings(trust_proxy_identity=True))
-    assert "max_concurrent_queries=4" in (exc.value.detail or "")
+        check_proxy_trust_coherent(s)
+    assert f"max_concurrent_queries={s.max_concurrent_queries}" in (exc.value.detail or "")
 
 
 def test_publishing_the_port_is_allowed_when_trust_is_OFF(monkeypatch) -> None:

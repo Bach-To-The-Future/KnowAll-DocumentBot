@@ -247,29 +247,28 @@ class Settings(BaseSettings):
     rate_limit_per_minute: int = 30   # 0 = disabled, per identity per window
     max_upload_bytes: int = 100 * 1024 * 1024  # mirrored at the Next.js proxy
     # Admission control: hard ceiling on in-flight queries per replica.
-    # Finding #37 — set from a MEASURED crossing, not a fitted line.
     #
-    # Worst-case latency for a full-context prompt (~7,700 tokens), warm model,
-    # cache-defeated, against llm_read_timeout=300s:
+    # MEASURED AGAINST MEMORY, which is what actually binds. Finding #37 is
+    # RETRACTED: it sized this against llm_read_timeout alone and never asked
+    # what else could run out first, so every number it produced is unfounded —
+    # the 4 that shipped, the 8-request crossing, and the 6–7 derived from it.
     #
-    #     concurrency  1     2     3     4     5     6     7     8
-    #     worst (s)   48.3  91.4 140.9 182.1 208.4 244.1 293.5 332.8
-    #                                                     ^^^^^ crosses at 8
+    # llama3.2:1b, api container at 5 GiB, 376-point corpus, cache defeated:
     #
-    # 20 admitted roughly THREE TIMES what the timeout tolerates: requests past
-    # the crossing were admitted only to time out, which is strictly worse than
-    # the 503 + Retry-After the semaphore already returns when full.
+    #     fixed resident             1.62 GiB
+    #     concurrency 1  settled     3.87 GiB    77% of limit
+    #     concurrency 2  settled     4.88 GiB    98% — fits, no headroom
+    #     concurrency 3  projected   5.88 GiB    does not fit
     #
-    # 4 rather than 7: at 7 the worst admitted request takes 293.5s against a
-    # 300s budget — no margin for a larger prompt, a slower disk, or a cold
-    # model load. At 4 the worst is 182.1s, about 60% of budget.
+    # Latency is the looser constraint: 106 s at 1, 108–141 s at 2, against a
+    # 300 s timeout. Memory binds two levels earlier.
     #
-    # 4 IS A qwen3.5:4b NUMBER, NOT A SYSTEM NUMBER. llama3.2:1b answers in
-    # seconds, so its crossing is far higher and 4 would needlessly throttle
-    # throughput. This value and the generator move TOGETHER -- see the
-    # generator package in docs/HANDOFF.md. Re-measure with
-    # scripts/stability_probe.py --phase ladder if the generator changes.
-    max_concurrent_queries: int = 4
+    # 1 MAKES THE INCUMBENT SINGLE-USER. That is a product decision, and if it
+    # is unacceptable the answer is the generator, not this number.
+    #
+    # core/admission_limits.py enforces this against the container's real cgroup
+    # limit at startup, so the coupling cannot drift into prose again.
+    max_concurrent_queries: int = 1
     # X-User-Id / X-Forwarded-For are only trusted because reaching the API
     # already requires a valid API key, held solely by the authenticated proxy.
     trust_proxy_identity: bool = True

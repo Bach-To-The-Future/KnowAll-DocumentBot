@@ -63,15 +63,24 @@ services:
     restart: unless-stopped
     deploy:
       resources:
-        # Finding #37 / stability suite. 6g was 98% consumed at the WORST
-        # REALISTIC case: a cold model load while already serving concurrent
-        # requests (5.90 GiB of 6.0, 0.10 GiB spare). That combination is not a
-        # stress test -- every deploy and every recovery hits it, so sizing to
-        # the ~5.6 GiB steady state makes the container tightest exactly when it
-        # is least stable.
-        # Applies to qwen3.5:4b (3.39 GB weights) + nomic-embed-text resident
-        # together. llama3.2:1b needs far less; see docs/HANDOFF.md.
-        limits: { memory: 8g }
+        # 4g SIZED FOR THE SHIPPED GENERATOR, llama3.2:1b. Measured 2.68 GiB
+        # resident with nomic-embed-text alongside it.
+        #
+        # WAS 8g, AND THAT WAS THE SECOND INSTANCE OF ONE PATTERN. The 8g was
+        # derived for qwen3.5:4b (3.39 GB weights) from cold-load-plus-
+        # concurrency reasoning that was sound for that model — and then shipped
+        # with a generator that was never adopted, exactly like
+        # max_concurrent_queries=4. Two numbers, both correct for a candidate,
+        # both applied to an incumbent they do not describe.
+        #
+        # The consequence was not academic: 8g here plus 4g worker plus 3g api
+        # declared 15.5 GiB against a host with 11.68 GiB, while the api
+        # container sat at 99.6% of its own limit and restarted under load.
+        #
+        # THIS VALUE MOVES WITH THE GENERATOR. core/startup_checks.py validates
+        # it against the configured model rather than trusting this comment —
+        # a comment is what failed to hold the coupling the first time.
+        limits: { memory: 4g }
     # No published ports: an exposed 11434 is an open inference endpoint.
     expose:
       - "11434"
@@ -125,8 +134,11 @@ services:
     stop_grace_period: 60s
     deploy:
       resources:
-        limits: { cpus: "2.0", memory: 4g }
-        reservations: { memory: 1g }
+        # 2g, reduced from 4g. Measured peak 137 MiB across ingest of the
+        # tier-B corpus; 4g was never justified by a measurement and it is part
+        # of why declared memory (15.5 GiB) exceeded the host (11.68 GiB).
+        limits: { cpus: "2.0", memory: 2g }
+        reservations: { memory: 512m }
     # Datastore credentials only: the worker serves no HTTP and needs no
     # API_KEY / session secrets.
     environment:
@@ -183,7 +195,23 @@ services:
     stop_grace_period: 30s
     deploy:
       resources:
-        limits: { cpus: "2.0", memory: 3g }
+        # 5g, raised from 3g. MEASURED, not estimated:
+        #
+        #   fixed resident (no query)         1.433 GiB   reranker ONNX session
+        #                                                 + BM25 model + runtime
+        #   after one query                   2.763 GiB   (+1.330)
+        #   plateau after four queries        2.989 GiB   (+0.226, then flat)
+        #
+        # The plateau is the important part: memory does NOT return to baseline
+        # after a query, but it does CONVERGE — allocator arenas holding freed
+        # pages rather than a leak. So the fix is a bigger limit, not a hunt.
+        #
+        # At 3g that plateau was 99.6% of the limit AT CONCURRENCY 1, leaving
+        # ~10 MiB. The container restarted under concurrent load (RestartCount
+        # 1 -> 2, no shutdown sequence), which is what a container dying at its
+        # ceiling looks like when the kernel kills a thread and the runtime
+        # exits 0.
+        limits: { cpus: "2.0", memory: 5g }
         reservations: { memory: 512m }
     # Datastore credentials + the API keys it validates. No SESSION_SECRET or
     # AUTH_PASSWORD: browser auth is entirely the web tier's concern.
@@ -217,7 +245,13 @@ services:
       API_KEY: ${API_KEY}
       API_QUERY_KEYS: ${API_QUERY_KEYS}
       RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-30}
-      MAX_CONCURRENT_QUERIES: ${MAX_CONCURRENT_QUERIES:-20}
+      MAX_CONCURRENT_QUERIES: ${MAX_CONCURRENT_QUERIES:-1}
+      # Inputs to core/admission_limits.py. The container reads its OWN limit
+      # from cgroup and the host total from /proc/meminfo; these two are the
+      # facts it cannot observe — what ollama was given, and what every service
+      # declares in total. Keep them in step with the limits above.
+      KNOWALL_OLLAMA_MEMORY_GIB: "4"
+      KNOWALL_DECLARED_MEMORY_GIB: "11.5"   # ollama 4 + worker 2 + api 5 + web 0.5
       MAX_QUEUE_DEPTH: ${MAX_QUEUE_DEPTH:-100}
       INGEST_BATCH_SIZE: ${INGEST_BATCH_SIZE:-256}
       MAX_CHUNKS_PER_DOCUMENT: ${MAX_CHUNKS_PER_DOCUMENT:-20000}
