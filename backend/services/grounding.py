@@ -117,12 +117,35 @@ def rendered_block(citation: dict) -> str:
     return f"{header}\n{citation.get('text', '')}"
 
 
+def cited_indices(body: str) -> list[int]:
+    """Citation indices attributed in `body`, in order.
+
+    R2 step 3. Exposed as a MODULE-LEVEL function so abstention detection can
+    use it WITHOUT the grounding mechanism being enabled. Previously this signal
+    existed only inside check(), which is gated behind require_support_quotes —
+    so the one structural fact about a decline ("it attributes nothing") was
+    only computable when a flag that ships OFF was on.
+    """
+    return sorted({int(n) for n in _CITATION_RE.findall(body)})
+
+
+def attributes_nothing(body: str) -> bool:
+    """True when the text credits no passage at all.
+
+    This is the structural definition of a decline: whatever words it uses, an
+    answer that attributes nothing is not an answer grounded in the corpus.
+    F35 detected declines by comparing to a fixed English sentence, which fails
+    on any rewording and cannot see a decline in another language at all.
+    """
+    return not cited_indices(body)
+
+
 def check(answer: str, citations: list[dict]) -> GroundingResult:
     """Verify every cited passage carries a quote that actually occurs in it."""
     body, quotes = split_support(answer)
     passages = {c["index"]: (normalize(c.get("text", "")),
                              normalize(rendered_block(c))) for c in citations}
-    cited = sorted({int(n) for n in _CITATION_RE.findall(body)})
+    cited = cited_indices(body)
 
     if not cited:
         # No claim is attributed to anything. D5 handles the empty case; here

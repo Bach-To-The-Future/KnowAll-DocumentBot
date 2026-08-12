@@ -65,6 +65,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from core.config import Settings
+from services.grounding import attributes_nothing, split_support
 
 logger = logging.getLogger(__name__)
 
@@ -82,6 +83,34 @@ _SCAFFOLDING = re.compile(
     r"|END\s+OF\s+UNTRUSTED\s+CONTENT",
     re.IGNORECASE,
 )
+
+
+def is_decline(text: str, decline_message: str) -> tuple[bool, str]:
+    """Is this generation a decline? Returns (verdict, how it was decided).
+
+    R2 step 3 — F35's structural fix. Two independent signals:
+
+      verbatim          the text IS the decline message, modulo whitespace and
+                        case. Exact and cheap, but fails on any rewording and
+                        cannot recognise a decline in another language.
+      attributes-nothing  the text credits no passage. This is the STRUCTURAL
+                        definition and it is language-independent: whatever
+                        words it uses, an answer attributing nothing is not an
+                        answer grounded in the corpus.
+
+    F35 used only the first, as `answer.strip() == NO_ANSWER_MESSAGE`. That is
+    a comparison against one fixed English sentence, in a system whose own eval
+    corpus is bilingual.
+
+    The two are reported separately rather than collapsed, so a divergence
+    between them is visible instead of being silently resolved one way.
+    """
+    body, _ = split_support(text)
+    if body.strip().casefold() == decline_message.strip().casefold():
+        return True, "verbatim"
+    if attributes_nothing(body):
+        return True, "attributes-nothing"
+    return False, ""
 
 
 @dataclass

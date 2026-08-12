@@ -413,7 +413,11 @@ class QueryService:
                                      prepared.request.question, answer)
         self._telemetry.record_query(
             timings=prepared.trace.get("timings", {}),
-            abstained=(answer.strip() == NO_ANSWER_MESSAGE),
+            # R2 step 3. Was `answer.strip() == NO_ANSWER_MESSAGE` — a
+            # comparison against one fixed English sentence, which missed any
+            # reworded decline and every non-English one. Now structural: an
+            # answer that attributes nothing is a decline whatever it says.
+            abstained=output_guard.is_decline(answer, NO_ANSWER_MESSAGE)[0],
             cache_hit=prepared.trace.get("cache_hit", False),
         )
         log_event("rag_query", answer_chars=len(answer), **prepared.trace)

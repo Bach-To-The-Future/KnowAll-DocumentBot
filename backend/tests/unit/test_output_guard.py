@@ -115,3 +115,75 @@ def test_log_counters_names_the_check_and_the_trace(caplog) -> None:
     output_guard.log_counters(outcome, trace_id="abc123")
     assert "abc123" in caplog.text
     assert "scaffolding=1" in caplog.text
+
+
+# --- R2 step 3: structural decline detection (F35) --------------------------
+
+DECLINE = "I could not find this information in the provided documents."
+
+
+def test_the_verbatim_decline_is_still_recognised() -> None:
+    """The old behaviour must not regress — it was correct, just narrow."""
+    verdict, how = output_guard.is_decline(DECLINE, DECLINE)
+    assert verdict is True
+    assert how == "verbatim"
+
+
+def test_whitespace_and_case_no_longer_defeat_it() -> None:
+    """F35 compared with `answer.strip() == NO_ANSWER_MESSAGE`, so a capital
+    letter or a trailing newline made a decline read as an answer."""
+    verdict, how = output_guard.is_decline(
+        f"  {DECLINE.upper()}  \n", DECLINE)
+    assert verdict is True
+    assert how == "verbatim"
+
+
+def test_A_FRENCH_DECLINE_IS_RECOGNISED() -> None:
+    """The case a fixed English string can never catch.
+
+    This system's own eval corpus is bilingual, and its abstention detection
+    compared against one English sentence.
+    """
+    verdict, how = output_guard.is_decline(
+        "Je n'ai pas trouve cette information dans les documents fournis.", DECLINE)
+    assert verdict is True
+    assert how == "attributes-nothing"
+
+
+def test_a_reworded_english_decline_is_recognised() -> None:
+    verdict, how = output_guard.is_decline(
+        "The provided documents do not contain that information.", DECLINE)
+    assert verdict is True
+    assert how == "attributes-nothing"
+
+
+def test_A_CITED_ANSWER_IS_NOT_A_DECLINE() -> None:
+    """The control, and the one that matters most.
+
+    "Attributes nothing" must not swallow real answers, or every metric built
+    on abstention inverts.
+    """
+    verdict, how = output_guard.is_decline(
+        "[1] The retention period is seven years. [1]", DECLINE)
+    assert verdict is False
+    assert how == ""
+
+
+def test_the_two_signals_are_reported_separately() -> None:
+    """Collapsing them would hide a divergence between them.
+
+    A decline that is verbatim AND attributes nothing is unremarkable; a
+    verbatim decline that DOES cite something would be worth seeing.
+    """
+    _, how_verbatim = output_guard.is_decline(DECLINE, DECLINE)
+    _, how_structural = output_guard.is_decline("No information available.", DECLINE)
+    assert how_verbatim != how_structural
+
+
+def test_it_does_not_require_the_grounding_flag() -> None:
+    """The signal lived inside grounding.check(), which is gated behind
+    require_support_quotes — a flag that SHIPS OFF. So the one structural fact
+    about a decline was only computable when grounding was enabled."""
+    from services.grounding import attributes_nothing as signal
+    assert signal("no citations here") is True
+    assert signal("[2] cited") is False
