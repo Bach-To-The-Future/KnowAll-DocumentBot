@@ -25,6 +25,9 @@ number is now.
 | `scripts/alias_reindex.py` as a working zero-downtime reindex | **RETRACTED** — **non-functional on any existing deployment.** The alias swap cannot complete where the collection was not bootstrapped alias-first. See §11 and FINAL_AUDIT P0-3. |
 | Snapshot-based backup in `RUNBOOK-reindex.md` | **RETRACTED** — Qdrant writes snapshots to `/qdrant/snapshots`, which is **not mounted**. Snapshots did not survive `docker compose down`. `--verify` could not detect this because it restores within the same container lifetime. Use a **volume-level** backup. |
 | Startup sweep "recovers" orphaned jobs | **RETRACTED** — it **fails** them, with `"Worker restarted while this job was in flight."` The user must re-upload. |
+| **Finding #37** — the admission ceiling and its 8-request crossing | **RETRACTED, not corrected.** The *derivation* was wrong: it sized `max_concurrent_queries` against `llm_read_timeout` alone and never asked what else could bind. **Memory binds, two levels earlier.** Every number it produced is unfounded — the 4 that shipped, the 8-request crossing, and the 6–7 derived from it. Measured replacement in `core/admission_limits.py`. |
+| `/ready`'s remediation text | **RETRACTED** — it said restarting the API calls `ensure_ready`. It did not; `ensure_ready` appeared nowhere in the API startup path, and its only occurrence under `api/` was inside that string. Restarting left `/ready` at 503; an **ingest** repaired it. Now made true rather than reworded: `api/main.py` calls it. |
+| The trust/port guard as enforcing | **RETRACTED** — it read `KNOWALL_API_PORT_PUBLISHED`, which nothing set (one mention, in a compose *comment*), so it passed on a genuinely published port. A container **cannot** observe host port publishing — measured, the socket view is identical either way — so the declaration is now required and its absence fails closed. |
 
 Two further corrections that are amendments, not retractions:
 
@@ -258,6 +261,35 @@ confirms an unchanged population still compares, so the guard cannot pass by
 refusing everything.
 
 **A rate is a fraction. Check the denominator before you read the numerator.**
+
+**3c. Do not measure a resource under the constraint you are trying to size.**
+Memory was profiled against the *existing* 3 GiB limit and appeared to converge
+at 2.99 GiB — "allocator arenas, not a leak". Raised to 5 GiB, the same workload
+climbed to **3.87 GiB** and converged there instead. The plateau was the
+CEILING, not the workload: pressed against the limit, the allocator had no room
+to expand and had to reuse.
+
+Nothing looked wrong, which is what separates this from practice 3 — there is no
+impossible shape to catch it on. The number was real, reproducible and precise,
+and it answered a different question than the one asked. **When sizing a limit,
+measure with the limit removed or generously raised**, then size to what you
+observe.
+
+**3d. Every resource number is an assumption until something forces a
+measurement.** Three instances, and the third is what generalises it:
+
+| number | basis | measured |
+|---|---|---|
+| `max_concurrent_queries=4` | derived for a candidate generator | 1 fits |
+| ollama `8g` | derived for the same unadopted candidate | 2.68 GiB |
+| worker `4g` | **nothing at all** | 137 MiB peak |
+
+The first two share a cause — values correct for `qwen3.5:4b`, shipped with a
+generator never adopted. The worker's has no such excuse: it was simply a
+number. Together they declared **15.5 GiB against an 11.68 GiB host**, which
+worked only because nothing approached its limit — a condition that expires
+silently. Audit every resource number for what produced it; "it has always been
+that" is not a basis.
 
 **4. Confirm a number measures the thing its threshold applies to.** A script
 reported *16 chunks over the 2048-token embedding limit*. The count was
@@ -682,22 +714,86 @@ PDF-specific answer, such as document title or heading detection.
 Each is answerable without reading the rest of this document.
 
 **1. The generator: adopt `qwen3.5:4b`, accept ungrounded output, or fund an
-entailment model?**
-The shipped generator (`llama3.2:1b`) cannot be made to ground its answers —
-it ignores the instruction to decline when the context lacks an answer (0 of 4
-near-miss questions), cannot be steered into a yes/no verdict, and collapses
-from 13/15 to 2/15 answered when asked for structured output. The candidate
-fixes all three, at a cost of **8 GiB instead of 6, four concurrent queries
-instead of twenty, and ~48 s per answer instead of seconds**. Those four move
-together — picking the model without the limits gives a system that admits
-five times what its timeout tolerates. Nothing has been switched.
+entailment model? — AND can the system serve more than one user at a time?**
 
-**2. If the incumbent is kept, may the concurrency limit and the container
-limit be reverted?**
-`max_concurrent_queries` was lowered from 20 to 4, and the ollama container
-from 6 GiB to 8 GiB. Both are sized for the candidate. On the incumbent, 4
-needlessly throttles a model that answers in seconds, and 8 GiB
-over-provisions. Reverting is two config values.
+This question has two halves now, and the second was not visible when it was
+first written.
+
+*Grounding.* The shipped generator (`llama3.2:1b`) cannot be made to ground its
+answers — it ignores the instruction to decline when the context lacks an answer
+(0 of 4 near-miss questions), cannot be steered into a yes/no verdict, and
+collapses from 13/15 to 2/15 answered when asked for structured output. The
+candidate fixes all three. Nothing has been switched.
+
+*Concurrency.* **The incumbent is effectively single-user.** Measured on the
+376-point corpus with the answer cache defeated:
+
+    concurrency 1   106 s,  3.87 GiB resident
+    concurrency 2   162-201 s,  4.88 GiB
+    concurrency 3   projected 5.88 GiB — does not fit a 5 GiB container
+
+`max_concurrent_queries=1` is what fits with headroom, and that is now enforced
+at startup (`core/admission_limits.py`). So the generator decision is no longer
+only about whether grounding can be enforced. **If one concurrent user is
+unacceptable, the answer is the generator change, not the ceiling** — no config
+value buys concurrency out of a model that takes 106 s to answer.
+
+Read those two together. A maintainer choosing to keep the incumbent is
+choosing both an ungrounded system and a single-user one.
+
+**2. Bootstrapping the alias, so a reindex path exists at all. (R5 — proposed,
+not implemented.)**
+
+`scripts/alias_reindex.py` cannot complete on any existing deployment: Qdrant
+refuses an alias colliding with a real collection, and `knowall_collection` is a
+real collection. Every deferred data migration — the five payload-field drops,
+cross-encoder enrichment, any embedding-model or chunk-size change — was
+deferred onto a path that does not work.
+
+*Shape.* One-time, per deployment:
+
+1. rename `knowall_collection` to `knowall_collection_v<stamp>`
+2. create alias `knowall_collection` → that collection
+3. from then on, `--confirm` works as designed
+
+*Cost to a deployment that has already ingested.* **No re-embedding.** Qdrant
+has no rename, so step 1 is either a snapshot-restore under a new name or a
+collection-to-collection copy; both move stored vectors as bytes and neither
+recomputes an embedding. The corpus is untouched, so no eval baseline is
+invalidated and `DIGEST_ENFORCEMENT_FROM` is unaffected.
+
+*Can queries continue during it?* **No.** This is the part with real exposure,
+and it is the inverse of the swap: the audit established that the swap **fails
+safe** (58 of 58 concurrent probes returned 200 while it failed), because it
+only ever adds an alias. The bootstrap moves the collection that is *being
+served*. Between the rename and the alias creation, the name `knowall_collection`
+resolves to nothing and every query fails. That window is short — an alias
+creation is metadata-only — but it is not zero, and it cannot be made zero,
+because Qdrant will not let the alias exist while the collection does.
+
+*Idempotency.* Achievable, and it must be: resolve the alias first; if it
+already points somewhere, exit 0 having done nothing. The dangerous state is
+**interruption between rename and alias creation**, which leaves a versioned
+collection and no alias — the system down and looking like a fresh install. A
+re-run must detect "a `knowall_collection_v*` exists with no alias pointing at
+it" and finish the job rather than starting over. That recovery path needs its
+own forcing test, because it is the state nobody will be calm in.
+
+*Estimated downtime.* Seconds for the alias flip; minutes-to-tens-of-minutes for
+the copy on a collection of this size, during which the old collection still
+serves. Schedule it, do not sneak it.
+
+*Orphan cleanup.* Now provided: `--drop-candidate`, which refuses any name that
+is not a candidate of this alias and refuses one the alias points at. Previously
+a failed swap left a verified candidate with no removal path but the raw API.
+
+**3. If the incumbent is kept, do the container limits still hold?**
+They have been re-derived from measurement rather than reverted: api 3→5 GiB,
+ollama 8→4 GiB, worker 4→2 GiB, declared total 15.5→11.5 GiB against an
+11.68 GiB host. The old values were all sized for a candidate or for nothing at
+all. Adopting `qwen3.5:4b` invalidates all of them and requires re-measuring —
+`core/admission_limits.py` has no profile for it precisely so that nobody
+copies a retracted number forward.
 
 **3. Is a corpus of real, licensed documents obtainable?**
 Every threshold in this system is either principled-but-unfitted or fitted to a

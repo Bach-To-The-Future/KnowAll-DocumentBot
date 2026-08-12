@@ -3045,3 +3045,61 @@ concurrent scans also deadlocked on Trivy's cache lock, and the local image scan
 timed out on a 10 GB image; the application-layer list was obtained by scanning
 the pinned lockfile directly, which is both faster and exactly the gate's scope.
 
+---
+
+## [Phase R1] Shipping-configuration correctness
+
+**R1.1 — the admission ceiling (1af91eb).** F37 RETRACTED, not corrected: it
+sized the ceiling against `llm_read_timeout` alone and never asked what else
+could bind. Memory binds two levels earlier. Measured on llama3.2:1b — fixed
+resident 1.62 GiB, concurrency 1 at 3.87, concurrency 2 at 4.88 (+1.004
+marginal), concurrency 3 projected 5.88. Limits re-derived: api 3→5g,
+ollama 8→4g, worker 4→2g, declared total 15.5→11.5 GiB against an 11.68 GiB
+host. Ceiling 4→1. `core/admission_limits.py` enforces it against the real
+cgroup limit, with three inputs (generator, limit, per-request delta) — a
+generator lookup alone would have passed the shipping config.
+
+A measurement artifact worth keeping: the first profile was taken *under* the
+3 GiB limit and appeared to converge at 2.99 GiB. Raised to 5 GiB the same
+workload climbed to 3.87. The plateau was the ceiling, not the workload.
+
+**R1.2–1.5 (6638061).** Four guards that read declarations instead of facts.
+
+  1.2  placeholder refusal extended to all credentials and BOTH entry points.
+       The worker ran no checks at all and started on the full placeholder set;
+       it is the entry point that writes to the index. Web tier gained its own
+       check for the three variables that exist only there.
+  1.3  MinIO's functional shipped credentials replaced with placeholders,
+       finishing 2.7.
+  1.4  the trust/port guard read a variable nothing set (one mention, in a
+       compose comment). MEASURED that a container cannot observe host port
+       publishing — the socket view is identical for 127.0.0.1 and 0.0.0.0
+       mappings — so the declaration is required and its absence FAILS CLOSED.
+  1.5  `/ready` added to both allowlists (it was on neither, so no browser
+       could reach it), and its remediation text made TRUE rather than
+       softened: api/main.py now calls ensure_ready.
+
+**R1.6 — alias bootstrap: PROPOSED, not implemented.** Written into HANDOFF §12
+question 2, covering shape, cost to an already-ingested deployment (no
+re-embedding; a copy, not a recompute), whether queries can continue (no — the
+bootstrap moves the collection being served, unlike the swap which fails safe),
+idempotency and the dangerous interrupted state, and downtime. The unreachable
+branch at alias_reindex.py:235-238 is DELETED and replaced with an explicit
+pre-swap refusal; `--drop-candidate` added for the orphan left by a failed swap.
+
+### Findings filed this phase
+
+P1-10 abstention-path ladder (right number, wrong quantity) · P1-11
+recreate-tail 502s (maximally credible on arrival, on the commit that had just
+bumped starlette) · P1-12 measuring a resource under the limit being sized ·
+P2-8 a test encoding a guard's broken semantics · P2-9 a test asserting a config
+value. Method practices 3c and 3d added to HANDOFF §3.
+
+### Self-check failures this phase
+
+Four of my own tests were wrong before the code was: one forbade documenting the
+dead variable in a comment; one mis-parsed `const READ_ONLY: RegExp[] = [`; and
+two pre-existing tests encoded the pre-R1.4 contract. Plus a live guard test
+that reported "started" because `docker compose exec` runs the IMAGE's /app, not
+the working tree — the same trap the eval README already warns about.
+

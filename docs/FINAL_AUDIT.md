@@ -448,6 +448,67 @@ wholesale rather than editing lines.
 
 *Not fixed.* R5 applies — proposed below.
 
+### P1-10 — the abstention-path ladder: a correct number for the wrong quantity
+
+The first concurrency ladder measured 145 s at 1 and 240 s at 2 and read as a
+latency crisis. The questions were unanswerable against that corpus, so every
+request took the **abstention** path: `chunks: []`, `answer_chars: 60`, and time
+dominated by `expansion_ms` — LLM query-expansion, not answer generation. The
+threshold being sized applies to the *answering* path.
+
+The number was real and reproducible. It simply measured a different thing.
+Same family as the 2048-token miscount, and detectable only by reading what the
+system logged about its own work rather than trusting the stopwatch.
+
+### P1-11 — the recreate-tail 502s: maximally credible on arrival
+
+Three concurrent queries returned `502` at ~61 s immediately after the commit
+that bumped **starlette to a major version**, on the streaming path. The obvious
+reading — a framework regression on the riskiest change in flight — was wrong:
+the API container was finishing a `--force-recreate` from the rebuild. A re-run
+gave 3× HTTP 200 with no restart.
+
+This is the §1d-bis pattern: a finding that arrives already agreeing with what
+you suspect gets *less* scrutiny, not more. Had it been accepted, the starlette
+bump would have been reverted for a defect it did not have.
+
+### P1-12 — measuring a resource under the limit being sized
+
+Memory profiled against the existing 3 GiB limit converged at 2.99 GiB and was
+reported as "allocator arenas, not a leak". Raised to 5 GiB, the same workload
+climbed to **3.87 GiB** and converged there. The plateau described the ceiling,
+not the workload.
+
+Distinct from the impossible-shape class in §3: **nothing looked wrong**. The
+measurement was precise, stable and reproducible. Detection heuristic: if a
+measurement's purpose is to *set* a constraint, it must not be taken *under*
+that constraint.
+
+### P2-8 — a test that encoded a guard's broken semantics
+
+`test_trust_with_an_unpublished_port_is_fine` **deleted**
+`KNOWALL_API_PORT_PUBLISHED` and asserted the guard passed. That is precisely
+the defect R1.4 fixes — an absent declaration read as "safe" — sitting in the
+suite as a **green test defending it**. Fixing the guard made the test fail, and
+that failure read as a regression.
+
+Distinct from the literal-value anti-pattern (P2-9), and the tell is different:
+brittleness is detected by asking *would a legitimate change break this?*, while
+this is detected by asking **would this test's failure signal progress?** If
+yes, the test encodes the defect. This one had been green through every prior
+run while the guard it covered passed on any configuration whatsoever.
+
+### P2-9 — a test asserting a config value rather than the behaviour around it
+
+`test_the_error_names_the_F37_consequence` asserted the literal string
+`"max_concurrent_queries=4"`. When the measured ceiling became 1, a correct
+change produced a failing test. It now asserts the message quotes **whatever
+ceiling is configured** — the behaviour — rather than the value.
+
+Any test asserting a config value turns every legitimate config change into a
+false regression, and trains readers to update tests to match code, which is the
+opposite of what tests are for.
+
 ### P3-1 — `next@15.3.3` carries CVE-2025-66478
 
 Reported by `npm ci`. Not investigated further.

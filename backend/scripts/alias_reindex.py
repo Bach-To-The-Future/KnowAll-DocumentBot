@@ -156,6 +156,13 @@ def main() -> int:
                              "swap is refused before the alias moves")
     parser.add_argument("--keep-old", action="store_true",
                         help="do not drop the previous collection after the swap")
+    # P2-2. A failed swap left the verified candidate behind with no way to
+    # remove it but the Qdrant API by hand. Building a candidate is the
+    # expensive part, so it is deliberately NOT auto-deleted on failure --
+    # but "no cleanup path at all" is a different thing from "kept on purpose".
+    parser.add_argument("--drop-candidate", metavar="COLLECTION",
+                        help="drop a leftover candidate collection from a failed "
+                             "run (refuses any name that is not a candidate)")
     args = parser.parse_args()
 
     settings = get_settings()
@@ -168,6 +175,23 @@ def main() -> int:
         print("REFUSING: the embedding model's digest could not be determined.",
               file=sys.stderr)
         return 2
+
+    if args.drop_candidate:
+        name = args.drop_candidate
+        # Refuse anything that is not a candidate of THIS alias. A cleanup flag
+        # that will delete an arbitrary collection is a footgun pointed at the
+        # live one, which is exactly what this script exists to protect.
+        if not name.startswith(f"{alias}_v"):
+            print(f"REFUSING: '{name}' is not a candidate of '{alias}' "
+                  f"(expected a name starting '{alias}_v').", file=sys.stderr)
+            return 2
+        if resolve_target(client, alias) == name:
+            print(f"REFUSING: '{name}' is what the alias currently points at.",
+                  file=sys.stderr)
+            return 2
+        client.delete_collection(name)
+        print(f"dropped leftover candidate {name}")
+        return 0
 
     current = resolve_target(client, alias) or alias
     if args.self_test:
@@ -223,19 +247,44 @@ def main() -> int:
         return 1
     print("  dimension, count, payload indexes and digests all verified")
 
+    # P0-3. If `alias` is still a REAL COLLECTION rather than an alias, the swap
+    # below cannot succeed: Qdrant refuses an alias whose name collides with an
+    # existing collection ("Wrong input: Collection `x` already exists!", 409).
+    # Fail here, with the reason, instead of raising a raw client exception four
+    # frames deep after the candidate has already been built.
+    #
+    # A branch used to sit AFTER the swap claiming that in this case "the alias
+    # now shadows it". It was unreachable — line 226 raises first — and its
+    # premise was false, because Qdrant permits no such shadowing. It has been
+    # deleted: dead reasoning that reads as handled is worse than absent, because
+    # it answers the question a reader would otherwise ask.
+    if current == alias:
+        print(f"\nCANNOT SWAP: '{alias}' is a real collection, not an alias.",
+              file=sys.stderr)
+        print(
+            f"Qdrant will not create an alias that collides with an existing "
+            f"collection, so this script cannot complete on any deployment whose "
+            f"collection was not created alias-first — which is every deployment "
+            f"that predates the alias design.\n"
+            f"A one-time bootstrap (rename the collection, point the alias at it) "
+            f"is required first, and it is a migration with downtime. See the "
+            f"proposal in docs/HANDOFF.md.\n"
+            f"The candidate {candidate} was built and verified; drop it with "
+            f"`scripts/alias_reindex.py --drop-candidate {candidate}` or keep it "
+            f"for the bootstrap.",
+            file=sys.stderr,
+        )
+        return 2
+
     client.update_collection_aliases(change_aliases_operations=[
         qm.CreateAliasOperation(
             create_alias=qm.CreateAlias(collection_name=candidate, alias_name=alias))
     ])
     print(f"\nALIAS SWAPPED: {alias} -> {candidate}")
 
-    if current != alias and not args.keep_old:
+    if not args.keep_old:
         client.delete_collection(current)
         print(f"dropped previous collection {current}")
-    elif current == alias:
-        print(f"NOTE: {current} is a real collection, not an alias target, so it "
-              f"was NOT dropped — the alias now shadows it. Remove it by hand "
-              f"once traffic is confirmed healthy.")
 
     print(f"\n    DIGEST_ENFORCEMENT_FROM={datetime.now(UTC).isoformat()}\n")
     print("Printed only because the full scroll above confirmed every point "

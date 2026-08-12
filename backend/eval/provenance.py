@@ -98,6 +98,12 @@ _SEMANTIC_BASE = (
 )
 
 _COSMETIC_BASE = (
+    # An admission gate: it bounds how many queries run AT ONCE and cannot
+    # change what a single query retrieves, so it is not semantic drift. It is
+    # recorded because it moved 4 -> 1 on measurement (finding #37 retracted),
+    # and a field absent from the tuple changes SILENTLY — this is the one that
+    # explains a latency difference between two otherwise identical runs.
+    "max_concurrent_queries",
     "reranker_revision",
     "bm25_revision",
     "git_sha",
@@ -185,6 +191,7 @@ def build(
         "query_expansion_count": settings.query_expansion_count,
         "enable_answer_cache": settings.enable_answer_cache,
         "llm_model": settings.llm_model,
+        "max_concurrent_queries": settings.max_concurrent_queries,
         "reranker_revision": os.getenv("KNOWALL_RERANKER_REVISION") or "unpinned",
         "bm25_revision": os.getenv("KNOWALL_BM25_REVISION") or "unpinned",
         "git_sha": _git_sha(),

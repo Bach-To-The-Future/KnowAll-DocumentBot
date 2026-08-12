@@ -43,6 +43,7 @@ def prov(**overrides: object) -> dict:
         "query_expansion_count": 3,
         "enable_answer_cache": True,
         "llm_model": "llama3.2:1b",
+        "max_concurrent_queries": 4,
         "reranker_revision": "2cfc18c",
         "bm25_revision": "e499a1f",
         "git_sha": "1111111",
@@ -315,3 +316,17 @@ def test_a_metric_absent_from_the_old_baseline_is_not_flagged(capsys) -> None:
         tolerance=0.02,
     )
     assert "no longer gated" not in capsys.readouterr().out
+
+
+def test_the_admission_ceiling_is_cosmetic_not_silent() -> None:
+    """4 -> 1 must be REPORTED and must not block the diff.
+
+    It bounds concurrency, not what a query retrieves, so it is not semantic
+    drift. But a field absent from the tuple entirely changes without comment,
+    and this is the field that explains a latency difference between two runs.
+    """
+    verdict, hard, semantic, cosmetic = classify(
+        prov(max_concurrent_queries=4), prov(max_concurrent_queries=1))
+    assert verdict == COSMETIC
+    assert [row[0] for row in cosmetic] == ["max_concurrent_queries"]
+    assert not hard and not semantic
