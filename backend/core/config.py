@@ -174,6 +174,15 @@ class Settings(BaseSettings):
     # generator-capability symptom, and stripping it does not fix that.
     strip_output_scaffolding: bool = True
 
+    # P1-2. The generator appends its own decline sentence to answers it has
+    # already given, so a correct cited answer ends with "I could not find this
+    # information in the provided documents."
+    #
+    # Content-based, not positional: a decline sitting MID-answer is the same
+    # defect. Only fires when the generation attributes something — a
+    # generation that credits no passage IS a decline and is left alone.
+    strip_appended_decline: bool = True
+
     # Finding #28 — semantic-drift guard on query rewrite. A rewrite whose
     # cosine similarity to the original question falls below this is discarded
     # and the original is used. Deliberately LOW: this is a safety net against

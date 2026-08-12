@@ -84,8 +84,12 @@ def test_counters_report_what_fired() -> None:
 
 
 def test_a_clean_generation_reports_nothing_fired() -> None:
+    """Every enabled check reports a zero, so "ran and found nothing" is
+    distinguishable from "did not run" — which is the distinction that made the
+    unwired stage invisible."""
     outcome = apply("[1] A clean answer.", settings())
-    assert outcome.counters == {"scaffolding": 0}
+    assert set(outcome.counters) == {"scaffolding", "appended_decline"}
+    assert all(v == 0 for v in outcome.counters.values())
     assert outcome.fired == []
 
 
@@ -97,10 +101,23 @@ def test_DISABLING_REPRODUCES_PRIOR_BEHAVIOUR_BYTE_FOR_BYTE() -> None:
     than a revert.
     """
     text = "Answer. <<<PASSAGE 1>>>  <<<END PASSAGE 1>>>  trailing   spaces."
-    outcome = apply(text, settings(strip_output_scaffolding=False))
+    outcome = apply(text, settings(strip_output_scaffolding=False,
+                                   strip_appended_decline=False))
     assert outcome.text == text
     assert outcome.counters == {}
     assert outcome.fired == []
+
+
+def test_each_check_is_reversible_INDEPENDENTLY() -> None:
+    """Disabling one check must not disable the other.
+
+    Reversibility is per-check by design, so an operator can turn off the one
+    that misbehaves without losing the rest.
+    """
+    text = "Answer. <<<PASSAGE 1>>>  trailing   spaces."
+    outcome = apply(text, settings(strip_appended_decline=False))
+    assert set(outcome.counters) == {"scaffolding"}
+    assert "<<<" not in outcome.text
 
 
 def test_log_counters_is_silent_when_nothing_fired(caplog) -> None:
@@ -187,3 +204,78 @@ def test_it_does_not_require_the_grounding_flag() -> None:
     from services.grounding import attributes_nothing as signal
     assert signal("no citations here") is True
     assert signal("[2] cited") is False
+
+
+# --- R2 step 4: appended decline, and the wiring -----------------------------
+
+def test_an_appended_decline_is_removed_from_a_cited_answer() -> None:
+    text = f"[1] The retention period is seven years.\n\n{DECLINE}"
+    cleaned, found = output_guard.strip_appended_decline(text, DECLINE)
+    assert found == 1
+    assert DECLINE not in cleaned
+    assert "seven years" in cleaned
+
+
+def test_a_MID_ANSWER_decline_is_removed_too() -> None:
+    """Content-based, not positional.
+
+    The observed case was trailing, but a decline sitting mid-answer is the
+    same defect and a trailing-only check would pass it.
+    """
+    text = f"[1] Seven years.\n\n{DECLINE}\n\n[2] Approval is by the director."
+    cleaned, found = output_guard.strip_appended_decline(text, DECLINE)
+    assert found == 1
+    assert DECLINE not in cleaned
+    assert "Seven years" in cleaned and "director" in cleaned
+
+
+def test_A_GENUINE_DECLINE_IS_LEFT_ALONE() -> None:
+    """The path that must stay distinguishable.
+
+    The generation IS the decline: it attributes nothing. Stripping it would
+    leave an empty response — the defect D5 exists to prevent.
+    """
+    cleaned, found = output_guard.strip_appended_decline(DECLINE, DECLINE)
+    assert found == 0
+    assert cleaned == DECLINE
+
+
+def test_a_decline_wearing_a_stray_citation_is_left_ALONE() -> None:
+    """The belt-and-braces case the two signals alone do not cover.
+
+    `[1]` makes it "attribute something", so the appendage branch is taken —
+    but removing the sentence leaves only a citation marker, which is not an
+    answer. The original is returned rather than an empty bubble.
+    """
+    text = f"[1] {DECLINE}"
+    cleaned, found = output_guard.strip_appended_decline(text, DECLINE)
+    assert found == 0
+    assert cleaned == text
+
+
+def test_appended_decline_is_reversible() -> None:
+    text = f"[1] Seven years.\n\n{DECLINE}"
+    outcome = apply(text, settings(strip_appended_decline=False),
+                    decline_message=DECLINE)
+    assert outcome.text == text
+
+
+def test_THE_STAGE_IS_ACTUALLY_REACHED_FROM_THE_ANSWER_PATH() -> None:
+    """The wiring, asserted separately from the checks.
+
+    The stage was built, unit-tested and committed while `_guard_output` was
+    DEFINED BUT NEVER CALLED. Every check passed in isolation; nothing ran in
+    production; the browser probe showed no change. That is exactly the defect
+    this phase exists to fix — asserting at the layer you built at rather than
+    the layer the user occupies — reproduced inside its own fix.
+
+    Source-level rather than behavioural because the alternative is a full
+    QueryService with a fake LLM, and the thing that broke was one missing line.
+    """
+    import inspect
+
+    from services.query import QueryService
+    source = inspect.getsource(QueryService.answer_prepared)
+    assert "_guard_output" in source, (
+        "answer_prepared must call _guard_output; defining it is not enough."
+    )

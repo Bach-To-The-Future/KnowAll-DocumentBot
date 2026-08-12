@@ -46,10 +46,10 @@ Tokens cannot be un-sent, so the split is explicit:
                bounded window of text. Scaffolding markers are short and
                self-delimiting, so they can be withheld until a boundary is
                resolved.
-  COMPLETION   trailing-abstention detection (needs the whole answer to know
-               whether the decline is the answer or an appendage), fabricated
-               provenance headers (needs the citation set), and anything
-               comparing against the full citation array.
+  COMPLETION   appended-decline removal (needs the whole answer to tell an
+               appendage from the answer), fabricated provenance headers (needs
+               the citation set), and anything comparing against the full
+               citation array.
 
 Completion-only checks reach the client through the `replace` event that D5
 established, rather than a second mechanism. Streaming wiring is deliberately
@@ -84,22 +84,25 @@ _SCAFFOLDING = re.compile(
     re.IGNORECASE,
 )
 
+_CITATION_MARKER = re.compile(r"\[\s*\d+\s*\]")
+_TRIM_CHARS = " \t\n\r.,;:—-[]()"
+
 
 def is_decline(text: str, decline_message: str) -> tuple[bool, str]:
     """Is this generation a decline? Returns (verdict, how it was decided).
 
     R2 step 3 — F35's structural fix. Two independent signals:
 
-      verbatim          the text IS the decline message, modulo whitespace and
-                        case. Exact and cheap, but fails on any rewording and
-                        cannot recognise a decline in another language.
+      verbatim            the text IS the decline message, modulo whitespace
+                          and case. Exact and cheap, but fails on any rewording
+                          and cannot recognise a decline in another language.
       attributes-nothing  the text credits no passage. This is the STRUCTURAL
-                        definition and it is language-independent: whatever
-                        words it uses, an answer attributing nothing is not an
-                        answer grounded in the corpus.
+                          definition and it is language-independent: whatever
+                          words it uses, an answer attributing nothing is not
+                          an answer grounded in the corpus.
 
-    F35 used only the first, as `answer.strip() == NO_ANSWER_MESSAGE`. That is
-    a comparison against one fixed English sentence, in a system whose own eval
+    F35 used only the first, as `answer.strip() == NO_ANSWER_MESSAGE`. That is a
+    comparison against one fixed English sentence, in a system whose own eval
     corpus is bilingual.
 
     The two are reported separately rather than collapsed, so a divergence
@@ -128,6 +131,21 @@ class GuardOutcome:
 Check = Callable[[str], tuple[str, int]]
 
 
+def _substantive(text: str) -> str:
+    """What is left once citation markers and punctuation are removed.
+
+    Mirrors the malformed-generation guard's notion of substance: `[1] [1][3]`
+    is not an answer.
+    """
+    return _CITATION_MARKER.sub("", text).strip(_TRIM_CHARS)
+
+
+def _collapse(text: str) -> str:
+    """Tidy the whitespace a removal leaves behind, without reflowing prose."""
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return re.sub(r"[ \t]{2,}", " ", text).strip()
+
+
 def strip_scaffolding(text: str) -> tuple[str, int]:
     """P1-1. Remove containment scaffolding the model reproduced.
 
@@ -144,23 +162,69 @@ def strip_scaffolding(text: str) -> tuple[str, int]:
     found = len(_SCAFFOLDING.findall(text))
     if not found:
         return text, 0
-    cleaned = _SCAFFOLDING.sub("", text)
-    # Collapse the blank lines the removal leaves behind, without touching
-    # paragraph structure elsewhere.
-    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
-    cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
-    return cleaned.strip(), found
+    return _collapse(_SCAFFOLDING.sub("", text)), found
 
 
-def _enabled_checks(settings: Settings) -> list[tuple[str, Check]]:
+def strip_appended_decline(text: str, decline_message: str) -> tuple[str, int]:
+    """P1-2. Remove a decline sentence from a generation that also answers.
+
+    CONTENT-BASED, NOT POSITIONAL. The observed case was a decline appended at
+    the end, but a decline sentence sitting MID-ANSWER is the same defect and a
+    trailing-only check would pass it — and this generator demonstrably produces
+    structurally odd output under exactly these conditions (the manual French
+    sample interleaved answers, headings and a fabricated provenance header).
+    So the sentence is removed wherever it appears.
+
+    THE TWO PATHS MUST STAY DISTINGUISHABLE, which is what is_decline's two
+    signals are for:
+
+      the generation IS a decline         attributes nothing -> LEAVE IT ALONE.
+                                          It is the answer, and stripping would
+                                          leave an empty response.
+      a decline is APPENDED to an answer  attributes something -> strip the
+                                          sentence, keep the cited answer.
+
+    Using the verdict alone would collapse these and delete the answer in the
+    first case. There is also a belt-and-braces check at the end: if removal
+    leaves nothing substantive, the original is returned untouched, because an
+    empty bubble is the defect D5 exists to prevent.
+    """
+    if not decline_message or decline_message not in text:
+        return text, 0
+
+    body, _ = split_support(text)
+    # The whole generation is a decline: it credits no passage. Not an
+    # appendage — the answer itself.
+    if attributes_nothing(body):
+        return text, 0
+
+    cleaned = _collapse(text.replace(decline_message, ""))
+
+    # Removal must never empty the response. If it would, the generation was
+    # effectively a decline wearing a stray citation, and it stays as it was.
+    if not _substantive(cleaned):
+        return text, 0
+
+    return cleaned, text.count(decline_message)
+
+
+def _enabled_checks(settings: Settings,
+                    decline_message: str = "") -> list[tuple[str, Check]]:
     """Checks in run order, filtered by their reversibility flags."""
     checks: list[tuple[str, Check]] = []
     if settings.strip_output_scaffolding:
         checks.append(("scaffolding", strip_scaffolding))
+    if settings.strip_appended_decline:
+        # Closure: this check needs the decline message, which the Check
+        # signature deliberately does not carry — every other check is a pure
+        # function of the text.
+        checks.append(("appended_decline",
+                       lambda t: strip_appended_decline(t, decline_message)))
     return checks
 
 
-def apply(text: str, settings: Settings) -> GuardOutcome:
+def apply(text: str, settings: Settings, *,
+          decline_message: str = "") -> GuardOutcome:
     """Run the stage over a completed generation.
 
     Returns the (possibly rewritten) text plus counters. Callers log the
@@ -168,7 +232,7 @@ def apply(text: str, settings: Settings) -> GuardOutcome:
     """
     counters: dict[str, int] = {}
     current = text
-    for name, check in _enabled_checks(settings):
+    for name, check in _enabled_checks(settings, decline_message):
         current, found = check(current)
         counters[name] = found
     return GuardOutcome(current, counters)
@@ -177,11 +241,11 @@ def apply(text: str, settings: Settings) -> GuardOutcome:
 def log_counters(outcome: GuardOutcome, *, trace_id: str) -> None:
     """One WARNING per generation that needed correcting, naming the checks.
 
-    At WARNING because a generation that emits its own prompt scaffolding is
-    not routine — it is the signal that the generator is not following the
-    output contract, and it should be visible at deployed log levels rather
-    than only when someone goes looking (the same reason payload-index failures
-    were moved off DEBUG in 2.6).
+    At WARNING because a generation that emits its own prompt scaffolding, or
+    appends a decline to its own answer, is not routine — it is the signal that
+    the generator is not following the output contract, and it should be visible
+    at deployed log levels rather than only when someone goes looking (the same
+    reason payload-index failures were moved off DEBUG in 2.6).
     """
     if not outcome.fired:
         return
