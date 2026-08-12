@@ -509,6 +509,52 @@ Any test asserting a config value turns every legitimate config change into a
 false regression, and trains readers to update tests to match code, which is the
 opposite of what tests are for.
 
+### P2-10 — a guard that reads a declaration rather than a fact
+
+R1's through-line. All four guards fixed in that phase shared one defect, and it
+is not specific to this codebase:
+
+| guard | what it read | what it should have read |
+|---|---|---|
+| admission ceiling | a generator name | the container's cgroup limit and the measured per-request cost |
+| trust/port coherence | `KNOWALL_API_PORT_PUBLISHED`, which nothing set | the actual binding — and when that is genuinely unobservable, fail closed |
+| `/ready` remediation | a sentence asserting `ensure_ready` runs at startup | whether anything calls it |
+| placeholder refusal | one credential at one entry point | every credential at every entry point |
+
+The same distinction as a model-pin verifier asserting a file is **present**
+when the download guarantees presence, and what matters is **exclusivity**. In
+each case the guard consults a *statement about* the system instead of the
+system, and a statement can be absent, stale, or false while the guard reports
+success.
+
+**Detection heuristic:** for each guard, ask *what would have to be true for
+this to pass while the condition it names is violated?* If the answer is "someone
+forgot to update a declaration", it is reading a declaration. Then either read
+the fact, or — when the fact is genuinely unobservable from where the guard runs
+— make the declaration **required** and treat its absence as unsafe.
+
+### P2-11 — the partial rebuild
+
+Four occurrences in this engagement, the last three by me while auditing for it:
+
+1. a live guard test reported "started" for a guard the image did not contain
+2. the provenance fix appeared not to work — `docker compose exec` runs the
+   image's `/app`, not the working tree
+3. an admission-guard test reported "started" for the same reason
+4. `/ready` 404'd through the proxy after api and worker were rebuilt but
+   **web** — where the allowlist lives — was not
+
+**A partially rebuilt stack is a different system from the one you tested**, and
+its behaviour is a mixture of two commits. It is especially dangerous because the
+result is usually *plausible*: the stale half behaves like the old code, which is
+exactly what a regression looks like.
+
+The fix is mechanical, not dispositional: rebuild every service before any
+end-to-end claim, or state in the report which services were rebuilt and which
+were not. `eval/baselines/README.md` already carried the warning — *"the code in
+the image matches git_sha (rebuild, don't docker compose cp)"* — which is the
+"having a rule is not reaching for it" rule, again.
+
 ### P3-1 — `next@15.3.3` carries CVE-2025-66478
 
 Reported by `npm ci`. Not investigated further.

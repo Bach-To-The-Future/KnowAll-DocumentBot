@@ -157,6 +157,23 @@ class Settings(BaseSettings):
     # REVERSIBLE: 0 disables the guard and reproduces pre-2.4 behaviour exactly.
     min_answer_chars: int = 20
 
+    # R2 — post-generation output handling (services/output_guard.py).
+    #
+    # Nothing inspected what the model EMITTED before it reached the user, so
+    # three defects shipped: containment scaffolding reproduced into answers,
+    # the abstention string appended to correct answers, and fabricated
+    # provenance headers in the visible text.
+    #
+    # Each check is independently reversible so that "turn it off" is a config
+    # change rather than a revert, and so a test can pin that disabling it
+    # reproduces prior behaviour byte-for-byte.
+    #
+    # MEASURED (browser path, 9 queries/language, production corpus): the
+    # fences reached the user in 2/9 French and 3/9 English generations.
+    # Defence in depth only — a model echoing its own prompt scaffolding is a
+    # generator-capability symptom, and stripping it does not fix that.
+    strip_output_scaffolding: bool = True
+
     # Finding #28 — semantic-drift guard on query rewrite. A rewrite whose
     # cosine similarity to the original question falls below this is discarded
     # and the original is used. Deliberately LOW: this is a safety net against

@@ -22,7 +22,7 @@ from core.interfaces import CacheStore, DenseEmbedder, LLMClient
 from core.telemetry import Telemetry, log_event, new_trace_id, timed
 from core.token_budget import fit_context_budget
 from models.schemas import QueryRequest, RetrievedChunk
-from services import grounding, passage_guard
+from services import grounding, output_guard, passage_guard
 from services.memory import SessionMemory
 from services.retrieval import RetrievalService
 
@@ -455,6 +455,20 @@ class QueryService:
             f"raw={answer[:160]!r}"
         )
         return NO_ANSWER_MESSAGE
+
+    def _guard_output(self, answer: str, prepared: PreparedQuery) -> str:
+        """R2. The last thing that touches an answer before the user sees it.
+
+        Runs AFTER the malformed-generation and grounding checks: those decide
+        whether the generation counts as an answer at all, and there is no point
+        cleaning text that is about to become the abstention message.
+        """
+        if answer == NO_ANSWER_MESSAGE:
+            return answer
+        outcome = output_guard.apply(answer, self._settings)
+        output_guard.log_counters(outcome, trace_id=prepared.trace["trace_id"])
+        prepared.trace["output_guard"] = outcome.counters
+        return outcome.text
 
     def _reject_if_malformed(self, answer: str, prepared: PreparedQuery) -> str:
         """Finding #32 (P-3 candidate D5). A generation carrying no substantive
