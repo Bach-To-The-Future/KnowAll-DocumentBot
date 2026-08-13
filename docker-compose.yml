@@ -95,13 +95,31 @@ services:
         wait
       "
     healthcheck:
-      # Healthy = server answering; model pulls may still be in flight
-      # (the API tolerates that: its startup model check is non-fatal).
-      test: ["CMD", "ollama", "list"]
+      # Healthy = the server answers AND both models are resident.
+      #
+      # This used to be `ollama list`, which passes as soon as the server
+      # responds — so `docker compose up -d --wait` returned exit 0 with 7/7
+      # "Healthy" while llama3.2:1b was still downloading, and EVERY QUERY
+      # returned 502 `404 ... /api/generate` with nothing pointing at the cause.
+      #
+      # It also made the generator-identity guard a no-op in that window: the
+      # API cannot compare a digest it could not read, so the drift protection
+      # was inactive during exactly the period a fresh deploy is most likely to
+      # have pulled something new. A guard passing because the thing it checks
+      # is not loaded yet is presence-not-invocation wearing a different hat.
+      #
+      # The model names are the same pair the entrypoint above already
+      # hardcodes, so this adds no coupling that did not exist.
+      test: ["CMD-SHELL", "ollama list | grep -q '^nomic-embed-text' && ollama list | grep -q '^llama3.2:1b'"]
       interval: 15s
       timeout: 10s
       retries: 5
-      start_period: 30s
+      # A COLD PULL IS ~1.6 GB. The previous 30s allowed 30 + 5x15 = 105s before
+      # the container was declared unhealthy, which a cold pull exceeds on any
+      # ordinary connection. Failures during start_period do not count against
+      # `retries`, so this is the window in which pulling is expected rather
+      # than broken.
+      start_period: 900s
     networks:
       - knowall-bot
 
