@@ -3103,3 +3103,103 @@ two pre-existing tests encoded the pre-R1.4 contract. Plus a live guard test
 that reported "started" because `docker compose exec` runs the IMAGE's /app, not
 the working tree — the same trap the eval README already warns about.
 
+---
+
+## [Phase R3] Structural cleanup — mostly declined
+
+The brief's default answer was no, and the default held for three of four items.
+
+### DECLINED: consolidating the verification scripts
+
+No concrete hazard could be named. They were forced to reject in Phase D, each
+with legible error text, and consolidation would trade a working guard for a
+tidier directory. `verify_model_pins`, `verify_tessdata`, `verify_ocr`,
+`verify_reindex`, `corpus/verify`, `embedding_fingerprint`, `startup_checks` and
+the gitignore guard stay exactly as they are.
+
+### DECLINED: extracting output handling from services/query.py
+
+R2 ALREADY DID IT. `services/output_guard.py` holds the checks; what remains in
+query.py is `_guard_output`, a 16-line adapter that calls it, logs the counters
+and records them in the trace. Moving the adapter would separate the wiring from
+the thing it wires, and the wiring is the orchestrator's job — the file's actual
+purpose.
+
+Measured before deciding, rather than assumed:
+
+    82 prepare          75 stream_prepared    46 build_prompt
+    44 rewrite          39 answer_prepared    29 _check_grounding
+    24 expand_queries   23 _reject_if_malformed  21 _finish
+    16 _guard_output    ... 12 others under 20 lines
+
+The two largest are the two request paths, which is what a coordinator is.
+
+`_reject_if_malformed` (D5) stays too, and deliberately: it decides whether a
+generation COUNTS as an answer, while output_guard cleans an answer that already
+counts. output_guard's own docstring says it "does not decide policy" — folding
+a policy decision into it would make that false.
+
+### DECLINED: extracting caching and telemetry
+
+Caching is four methods totalling 37 lines; telemetry is one method of 21. No
+defect motivates moving either, and the brief was explicit that absent a defect
+the answer is no.
+
+### DONE: the config-flag audit
+
+    DEAD FLAGS: ZERO.
+
+The audit first reported eight, and all eight were artifacts of its own search
+path: the four `*_model` fields are consumed by `computed_field` properties
+inside config.py, which the search excluded, and `enable_ocr` / `ocr_languages`
+/ `ocr_dpi` live in extraction/, which the search omitted. A dead-code audit with
+an incomplete search path MANUFACTURES dead code. Verified each by hand.
+
+The tool also first reported ALL 70 flags as dead, because its grep used `|`
+alternation without `-E` and BRE read it as a literal pipe. That shape was
+impossible enough to catch itself.
+
+Two genuine findings, both PROPOSED not implemented, since changing the
+provenance tuple is a behaviour change:
+
+  1. OCR SETTINGS ARE ABSENT FROM PROVENANCE.
+     `enable_ocr`, `ocr_languages` and `ocr_dpi` change the text extracted from
+     scanned PDFs, therefore the stored vectors, therefore what any eval
+     measures. `chunk_size` and `chunk_overlap` affect stored text in EXACTLY
+     the same way and are HARD fields. `corpus_manifest_sha256` does not cover
+     it — it hashes SOURCE files, not extracted text. Two baselines taken across
+     an OCR-setting change would compare as COMPARABLE while measuring
+     different corpora. Same shape as the n_answerable gap.
+
+  2. FULL-MODE GENERATION FLAGS ARE ABSENT.
+     `llm_num_ctx`, `llm_temperature`, `llm_num_predict`, `llm_enable_thinking`,
+     `require_support_quotes`, `min_answer_chars`, `rewrite_min_similarity` and
+     the four `strip_*` flags all change the ANSWER, which full mode measures.
+     In retrieval mode the LLM never runs, so they are correctly irrelevant
+     there — this is the conditional-classification case `llm_model` already
+     has.
+
+"Unpinned by tests" turned out to be a weak signal: `strip_output_scaffolding`
+appears in it, yet is exercised by a reversibility test that DERIVES the flag
+set from Settings rather than naming flags literally — which is the better
+design, and the one adopted after the literal-value anti-pattern (P2-9).
+
+### DEFERRED, EXPLICITLY: the five payload-field drops
+
+`key`, `chunk_index`, `total_chunks`, `content_type`, `image_count`. Verified
+write-only: no reader, and NO FieldCondition on any of them, so they are not
+load-bearing for filtering.
+
+    cost    a full re-ingest of 377 points across 14 documents via in-place
+            scripts/reindex.py, which rewrites the LIVE collection and degrades
+            retrieval for the whole run
+    benefit ~100 KB of payload and a tidier schema. No correctness benefit, no
+            performance benefit — nothing is indexed on them
+
+Deferring onto the alias bootstrap (HANDOFF section 12, question 2) rather than
+leaving it floating: the original reasoning — "it should ride along with a
+reindex that is happening anyway" — is still correct, and the bootstrap is a
+migration that will happen anyway. It is NOT deferred onto the alias SWAP, which
+does not work; it is deferred onto the bootstrap that would make the swap
+possible.
+

@@ -599,6 +599,31 @@ means asserting the caller invokes it; for a file, that the consumer resolves to
 it; for a pin, that no alternative is reachable. "It is there" and "it is used"
 are different claims, and only the second is ever the one you care about.
 
+### P2-14 — interpret survivors, do not count them
+
+After R2's fixes, one provenance header survived: `(Source: ABC DELF junior
+A2.pdf, Page: 90)`. In aggregate that is "1/9, down from 1/9" — a residual, and
+the obvious reading is that the fix is incomplete.
+
+Reading the individual case said something else. That document **was** genuinely
+retrieved for French queries, so retaining the header is the design working:
+only never-retrieved sources are stripped. But checking *why* it survived
+exposed that the ambiguous case — a real document with a **disagreeing page** —
+was documented as "counted, not stripped" and was in fact **neither**. Invisible
+to the stripper and to the counter.
+
+That was the highest-information observation in the whole run, and it came from
+the single case that did not fit.
+
+**A residual that matches the design and a residual that reveals a gap are
+identical in aggregate.** Only the individual case distinguishes them, so a
+post-fix survivor is worth more attention than the count it contributes to.
+Counting tells you how much is left; reading tells you whether you understand
+what is left.
+
+Corollary: when a rate does not go to zero, the useful question is not "how
+close did we get" but "is each remainder the same kind of thing I expected".
+
 ### P3-1 — `next@15.3.3` carries CVE-2025-66478
 
 Reported by `npm ci`. Not investigated further.

@@ -738,8 +738,25 @@ only about whether grounding can be enforced. **If one concurrent user is
 unacceptable, the answer is the generator change, not the ceiling** — no config
 value buys concurrency out of a model that takes 106 s to answer.
 
-Read those two together. A maintainer choosing to keep the incumbent is
-choosing both an ungrounded system and a single-user one.
+*Output contract.* A third, independent argument arrived with R2. The generator
+emits its own prompt scaffolding into answers (`<<<PASSAGE 1>>>`, the
+sanitizer's `[removed: injection-shaped content]`), appends its own decline
+sentence to answers it has already given, and writes fabricated
+`(Source: X, Page: Y)` headers into visible prose. Measured through the browser:
+scaffolding in **5 of 18** generations, an appended decline in 1, a fabricated
+header in 2.
+
+`services/output_guard.py` now stops all of that reaching users, and the
+post-fix rate is 0 of 18 with the stage observed firing seven times. **But the
+generator is unchanged.** It still emits every one of these; the stage is
+DEFENCE IN DEPTH, not a repair. A generator that could satisfy an output
+contract would not need it.
+
+Read all three together. A maintainer choosing to keep the incumbent is choosing
+an ungrounded system, a single-user one, **and** one whose output must be
+cleaned after the fact because the model will not follow instructions about its
+own output. Those are not three preferences; they are three measurements of one
+property.
 
 **2. Bootstrapping the alias, so a reindex path exists at all. (R5 — proposed,
 not implemented.)**
