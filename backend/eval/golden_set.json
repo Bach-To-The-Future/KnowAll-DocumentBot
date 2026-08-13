@@ -11,7 +11,8 @@
     "history": "optional prior turns [{question, answer}] seeded into session memory in full mode; drives the needs_rewrite() branch",
     "expects_rewrite": "the needs_rewrite() verdict this entry must produce. A mismatch FAILS the eval run — that is how a widened anaphora regex is caught before it silently rewrites standalone questions",
     "note": "optional context for humans",
-    "full_mode_only": "true = this entry REQUIRES history-based query rewriting, which only full mode performs. Retrieval mode sends the question to the retriever verbatim, so failing there is the mode behaving correctly, not a defect. Excluded from retrieval-mode metrics; still reported in its category slice."
+    "full_mode_only": "true = this entry REQUIRES history-based query rewriting, which only full mode performs. Retrieval mode sends the question to the retriever verbatim, so failing there is the mode behaving correctly, not a defect. Excluded from retrieval-mode metrics; still reported in its category slice.",
+    "requires_document": "optional list of corpus documents that must be INDEXED for this entry to mean what it was written to mean. Defaults to expected_sources. State it explicitly when an unanswerable entry's difficulty depends on a document being present to be confused with. run_eval.py drops entries whose required documents carry ingest: false in MANIFEST.yaml."
   },
   "entries": [
     {
@@ -525,7 +526,10 @@
       "expected_sources": [],
       "expected_keywords": [],
       "expects_rewrite": false,
-      "note": "ABSENT SPECIFIC (fr). b04 carries CT-9001 only. Retrieving the CT-9001 notice period here would be a confidently wrong answer, not a near miss."
+      "note": "ABSENT SPECIFIC (fr). b04 carries CT-9001 only. Retrieving the CT-9001 notice period here would be a confidently wrong answer, not a near miss. requires_document: this entry only TESTS anything while b04 is in the index -- without CT-9001 present to be confused with, abstaining here is free and would inflate correct_abstention_rate. b04 is currently ingest: false (see MANIFEST.yaml), so run_eval.py drops this entry rather than scoring a freebie.",
+      "requires_document": [
+        "b04-wide-row.csv"
+      ]
     }
   ]
 }

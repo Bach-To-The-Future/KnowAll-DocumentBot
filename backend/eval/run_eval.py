@@ -172,6 +172,37 @@ def load_golden(path: str) -> list[dict[str, Any]]:
     return entries
 
 
+def required_documents(entry: dict[str, Any]) -> list[str]:
+    """Which corpus documents must be in the index for this entry to mean
+    what it was written to mean.
+
+    Defaults to `expected_sources`, which is right for answerable entries.
+    An UNANSWERABLE entry has no expected sources and still can depend on a
+    document: "how many days notice for CT-9002?" is only a test of
+    discrimination while CT-9001 is present to be confused with it. Those
+    entries declare `requires_document` explicitly.
+    """
+    explicit = entry.get("requires_document")
+    if explicit is not None:
+        return list(explicit)
+    return list(entry.get("expected_sources") or [])
+
+
+def drop_unindexed(
+    entries: list[dict[str, Any]], indexed: set[str]
+) -> tuple[list[dict[str, Any]], list[tuple[str, list[str]]]]:
+    """Split the golden set on whether the index can answer it at all."""
+    keep: list[dict[str, Any]] = []
+    dropped: list[tuple[str, list[str]]] = []
+    for entry in entries:
+        missing = [d for d in required_documents(entry) if d not in indexed]
+        if missing:
+            dropped.append((str(entry.get("question", "")), missing))
+        else:
+            keep.append(entry)
+    return keep, dropped
+
+
 def is_relevant(text: str, source: str, entry: dict) -> bool:
     if source not in entry["expected_sources"]:
         return False
@@ -481,6 +512,20 @@ def main() -> int:
         if skipped_full_only:
             print(f"retrieval mode: skipping {skipped_full_only} full-mode-only "
                   f"entries (they require query rewriting)")
+
+    # A question about a document that is not in the index is not a defect
+    # the system can fix, and scoring it produces a permanent fake regression:
+    # the answerable ones become guaranteed false abstentions, and an
+    # unanswerable one authored as a near-miss AGAINST that document degrades
+    # into a freebie that inflates correct_abstention_rate. Derived from the
+    # manifest, not from a list here, so it cannot disagree with what was
+    # actually ingested.
+    entries, dropped = drop_unindexed(entries, corpus_verify.ingested_documents())
+    for question, missing in dropped:
+        print(f"skipping (not indexed: {', '.join(missing)}): {question[:60]}")
+    if dropped:
+        print(f"{len(dropped)} golden entries dropped; the provenance "
+              f"denominators below record the population that remains")
     if args.tier:
         entries = [e for e in entries if e["tier"] == args.tier]
         if not entries:
@@ -505,6 +550,9 @@ def main() -> int:
         "k": k,
         "n_entries": len(entries),
         "skipped_full_mode_only": skipped_full_only,
+        "skipped_not_indexed": [
+            {"question": q, "missing": m} for q, m in dropped
+        ],
         "provenance": provenance.build(
             settings,
             corpus_manifest_sha256=corpus_verify.manifest_hash(),

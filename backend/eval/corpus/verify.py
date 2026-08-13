@@ -43,6 +43,27 @@ def load_manifest() -> dict[str, Any]:
     return _load_manifest()
 
 
+def is_ingested(entry: dict[str, Any]) -> bool:
+    """Does this document go into the index?
+
+    Default true. A document can be part of the corpus DEFINITION without being
+    part of the INDEX: b04-wide-row.csv is a single row wider than the embedding
+    window, so the token-budget guard refuses it, and it is kept as a fixture
+    proving that boundary is reachable rather than deleted.
+
+    This is the one place that decides. eval/ingest_corpus.py and
+    eval/run_eval.py both call it, so what is indexed and which golden entries
+    are scorable cannot drift apart.
+    """
+    return bool(entry.get("ingest", True))
+
+
+def ingested_documents(manifest: dict[str, Any] | None = None) -> set[str]:
+    """Basenames of the documents that actually reach the index."""
+    m = manifest if manifest is not None else _load_manifest()
+    return {Path(e["path"]).name for e in m["documents"] if is_ingested(e)}
+
+
 def sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as fh:
@@ -73,6 +94,15 @@ def verify() -> int:
         if missing_fields:
             errors.append(f"{entry.get('path', '<no path>')}: missing fields {missing_fields}")
             continue
+
+        # `ingest` decides whether a document reaches the index, so a typo
+        # ("no", "false", 0) must not be read as truthy and silently index a
+        # document the guard would refuse.
+        if "ingest" in entry and not isinstance(entry["ingest"], bool):
+            errors.append(
+                f"{entry['path']}: 'ingest' must be a YAML boolean, got "
+                f"{entry['ingest']!r} ({type(entry['ingest']).__name__})"
+            )
 
         rel = Path(entry["path"])
         target = CORPUS_DIR / rel
@@ -115,6 +145,14 @@ def verify() -> int:
     for entry in documents:
         by_tier[entry["tier"]] = by_tier.get(entry["tier"], 0) + 1
     print(f"corpus OK: {len(documents)} documents verified " + str(by_tier))
+    not_ingested = [e["path"] for e in documents if not is_ingested(e)]
+    if not_ingested:
+        # Stated on every run: the difference between the corpus and the index
+        # is the kind of thing that becomes invisible three months later.
+        print(f"  {len(documents) - len(not_ingested)} indexed, "
+              f"{len(not_ingested)} kept as fixtures only:")
+        for path in not_ingested:
+            print(f"    - {path} (ingest: false)")
     print(f"manifest_sha256: {manifest_hash()}")
     return 0
 

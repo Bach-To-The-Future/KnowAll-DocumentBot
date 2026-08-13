@@ -17,6 +17,13 @@ using the manifest's own hash as the etag makes the point IDs a pure function
 of the corpus definition: re-running is idempotent, two machines produce
 identical IDs, and a document edited without updating the manifest is caught by
 verify() before it can reach the index.
+
+THE CORPUS IS NOT THE INDEX. A manifest entry may carry `ingest: false`, which
+means it is verified and hashed like everything else but never embedded. The
+only current case is b04-wide-row.csv, whose single row exceeds the embedding
+window; the token-budget guard refuses it and is right to. run_eval.py reads
+the same flag and drops the golden entries that depend on it, so the eval
+denominators move with the index rather than silently disagreeing with it.
 """
 from __future__ import annotations
 
@@ -64,13 +71,27 @@ def main() -> int:
     print(f"etag (manifest sha256): {etag}\n")
 
     total = 0
+    indexed = 0
     for doc in manifest["documents"]:
+        if not corpus_verify.is_ingested(doc):
+            # Not an error, and not a silent skip. See MANIFEST.yaml: this
+            # document is verified, hashed and kept, but the token-budget
+            # guard refuses to embed it, so "index it" is not an option that
+            # exists. Printed on every run because the difference between the
+            # corpus and the index is exactly the kind of thing that becomes
+            # invisible three months later.
+            print(f"  [{doc['tier']}] {doc['path']:<34} {'SKIPPED':>5}  "
+                  f"(ingest: false, kept as a unit fixture)")
+            continue
         path = str(corpus_verify.CORPUS_DIR / doc["path"])
         count = container.ingestion.process_document(path, etag=etag)
         total += count
+        indexed += 1
         print(f"  [{doc['tier']}] {doc['path']:<34} {count:>5} chunks")
 
-    print(f"\n{total} chunks indexed from {len(manifest['documents'])} documents.")
+    skipped = len(manifest["documents"]) - indexed
+    print(f"\n{total} chunks indexed from {indexed} documents"
+          + (f" ({skipped} verified but not indexed)." if skipped else "."))
     return 0
 
 
