@@ -15,7 +15,7 @@ That is the whole value proposition, and it sets the shape of the document:
 **Part VI, the measurement discipline, is the centre of gravity.** Parts III–V
 exist to make Part VI credible. They are the evidence; Part VI is the argument.
 
-Seventeen distinct anti-patterns were catalogued during the work. **Almost none
+The anti-patterns catalogued in Part VII came out of that work, and **almost none
 were found by reading code.** They were found by forcing a guard to fail, by
 noticing a number whose shape was impossible, or by a defect surfacing something
 review had passed over. Several were committed *by the auditor while auditing
@@ -35,21 +35,35 @@ scored below `0.25` — as *a risk already mitigated*. The reasoning was sound: 
 relevance floor prevents weak matches reaching the generator. It is standard
 practice. It appears in tutorials.
 
-Then it was measured.
+Then it was measured — on two corpora, and **both numbers need stating, because
+each is misleading on its own**:
 
-```
-recall_at_fetch    1.000     the retriever fetched the correct chunk for
-                             EVERY answerable question
-                             ...and the floor discarded it on 15 of 22
-```
+| corpus | discarded by the floor | `recall_at_fetch` |
+|---|---|---|
+| tier B — synthetic, 13 documents, 18 chunks | **15 of 22** | 1.000 |
+| production — 13 real documents, 377 points | **3 of 21** | — |
 
-The retriever was working perfectly. The floor was throwing the answer away.
+**The synthetic figure overstates the defect.** With 18 chunks and `fetch_k=20`,
+retrieval was fetching the entire corpus, so `recall_at_fetch = 1.000` is
+arithmetic rather than a retrieval result — exactly what Part III warns you to
+distrust. Tier B was also *deliberately table-heavy*, built to exercise tabular
+and OCR extraction, and tables are precisely what this floor punishes. That is
+why the defect surfaced there first, and why 15/22 is not a rate to port.
 
-The mechanism was subtle and is worth understanding, because it generalises:
-a cross-encoder's absolute score is influenced by chunk **shape** as much as by
-relevance. Tables, bulleted lists and OCR-recovered text score low *because they
-are tables, lists and OCR text* — not because they fail to answer the question.
-A single first-place, correct chunk routinely scored `0.05`.
+**The production figure understates it.** 3 of 21 is a real-corpus measurement,
+but that corpus is prose-dominated, so it under-samples the shapes the floor
+discriminates against. A corpus with more tables would sit between the two.
+
+**What both agree on is the direction and the mechanism**, and that is the part
+that transfers: a cross-encoder's absolute score is influenced by chunk **shape**
+as much as by relevance. Tables, bulleted lists and OCR-recovered text score low
+*because they are tables, lists and OCR text* — not because they fail to answer
+the question. A single first-place, correct chunk routinely scored `0.05`.
+
+The retriever was working. The floor was throwing the answer away. On one corpus
+that cost two thirds of the answerable questions; on the other, one in seven.
+Neither number is *the* number, and a system with different formatting would get
+a third.
 
 **RAG mechanics are documented adequately elsewhere.** What is not documented is
 that following current best practice produces exactly this, and that nothing
@@ -86,6 +100,59 @@ about at any time.
 *Detection heuristic:* for any configuration value, ask **"if this is wrong, do
 I need to re-embed?"** If yes, it is an ingestion decision and must be measured
 before it ships, not after.
+
+## And the question that follows it: have you ever run that path end to end?
+
+The paragraph above quietly assumes something. "An ingestion defect requires a
+reindex to repair" is only reassuring if the reindex **works** — and migration
+paths are the least-exercised code in most systems, because by construction they
+run rarely and are needed most when something has already gone wrong.
+
+**Measured here, and it is the engagement's largest finding.** The system had a
+zero-downtime reindex: build into a new collection, verify it, atomically swap an
+alias, drop the old one. It was carefully written, it had a self-test, and it
+**could not complete on any deployment that existed**.
+
+The datastore refuses to create an alias whose name collides with a real
+collection — and the live collection *was* a real collection, because it had
+never been created alias-first. So the swap failed, and would fail on every
+deployment not built that way from day one, which was all of them.
+
+Three details make this worth studying rather than merely noting:
+
+1. **The script contained a branch handling that exact case** — placed *after*
+   the line that raises, so unreachable, and asserting something the datastore
+   does not permit ("the alias now shadows it"). The reasoning had been done and
+   never executed.
+2. **The self-test passed**, because it only ever exercised the *refusal* path:
+   it built a deliberately-wrong candidate and confirmed the swap was declined.
+   It never reached a successful swap, so it could not discover that a
+   successful swap was impossible.
+3. **It was found by running it for real, against live traffic** — not by
+   reading it. Every static signal said it was fine.
+
+There is a second instance in the same family. Every database snapshot taken
+during this engagement was written to a container path that **was not mounted**,
+so none survived `docker compose down`. The `--verify` step passed each time,
+because it restored the snapshot *within the same container lifetime* — the
+check and the defect shared the assumption that the container persists. "A
+snapshot nobody has restored is a backup nobody has tested" was written in the
+runbook; this snapshot *was* restored, successfully, and was still worthless.
+
+Both are Rule 7 (*reasoning written down is not reasoning executed*) applied to
+**recovery rather than logic**, and recovery is where it hurts most: you find out
+at the moment you had planned to rely on it.
+
+*Detection heuristic:* for every migration, backup and restore path, ask **"when
+did this last run end to end, on something shaped like production?"** If the
+answer is "its tests pass", you do not know. Then check what the happy path
+would have to do that the test never makes it do — a self-test that only
+exercises refusal proves the refusal, and nothing else.
+
+**And the corollary that matters for planning:** every deferred ingestion
+decision — "we'll fix the chunk size at the next reindex", "we'll drop those
+payload fields when we migrate" — is a debt drawn against that path. If it does
+not work, none of those deferrals are deferred; they are cancelled.
 
 ---
 
@@ -573,10 +640,15 @@ measurable results. If your model cannot follow an output contract, do not buy a
 grounding mechanism — buy a bigger model, or move the check outside the model
 entirely.
 
-## What worked, and what it cost
+## What worked: checks that do not ask the model anything survive a weak model
 
-Two mechanisms did work, and both share a property: **no model judgement is
-involved in the check.**
+That is the actionable conclusion of the entire grounding investigation, and it
+is worth stating before the examples rather than after them. Every mechanism
+that survived the 1B generator shares one property — **the check itself involves
+no model judgement.** Every mechanism that failed required the model to be
+trustworthy about something other than reading.
+
+Two that worked:
 
 - **Separating abstention from relevance** (Part III). A structural change with
   a measured before/after.
@@ -812,8 +884,22 @@ thing it was for.
 
 *Detection heuristic:* for each guard, ask **"what input makes this fail?"** If
 you cannot construct one in a few minutes, the guard is decorative. Then actually
-construct it and watch it fail — nine guards in this engagement passed their own
-tests while doing nothing.
+construct it and watch it fail.
+
+**Four** guards in this engagement passed their own tests while doing nothing:
+the pin verifier above; an identity test that set an environment variable *in the
+shell*, which the container runtime never passed through, so the passing test
+exercised nothing; a rewrite guard that checked emptiness and length but not
+content, and passed a fluent rewrite about a different subject; and seventeen
+grounding tests that were green while the mechanism they covered measured **0 of
+15** in production, because they fed well-formed input to a parser and never
+asked whether the generator could produce it.
+
+Four is the honest count, and it is worth contrasting with what happened when
+the remaining guards were *deliberately* forced: **23 were made to reject, and
+all 23 fired with legible errors.** So the base rate of decorative guards was low
+— the problem was never that most guards are fake, it is that you cannot tell
+which are without trying.
 
 ### 2. Verify at the layer the user occupies, not the layer you built at
 
@@ -836,18 +922,24 @@ cold model load.
 latency falling under load, accuracy rising as a task gets harder — are free to
 spot and expensive to miss.
 
-### 3b. Do not measure a resource under the constraint you are sizing
+### 4. Do not measure a resource under the constraint you are sizing
 
 *The failure.* Memory converged at 2.99 GiB against a 3 GiB limit and was
 reported as a natural plateau. With 5 GiB it converged at 3.87 GiB. The number
 described the ceiling.
 
 *Detection heuristic:* if a measurement's purpose is to **set** a constraint, it
-must not be taken **under** that constraint. Unlike rule 3, nothing looks wrong
-here — the number is precise, stable and reproducible, and answers a different
-question than the one asked.
+must not be taken **under** that constraint.
 
-### 4. Confirm a number measures the thing its threshold applies to
+**This is a separate rule from 3, not a variant of it, and the difference is
+what makes it dangerous.** Rule 3 is caught by shape: latency falling under load
+is impossible, and impossible costs nothing to spot. Here **nothing looks
+wrong** — the number is precise, stable, reproducible, and survives repetition.
+It simply answers a different question than the one asked. There is no shape to
+catch it on; the only defence is to notice that the instrument and the subject
+share a constraint.
+
+### 5. Confirm a number measures the thing its threshold applies to
 
 *The failure.* A script reported "16 chunks over the 2048-token embedding limit".
 The count was right; the quantity was wrong — those were chunks *after context
@@ -864,7 +956,7 @@ all — and was about to be compared against generation-path numbers.
 units and are different things. Be most suspicious of numbers that confirm what
 you already believe.
 
-### 5. Before reading a metric as improved, confirm its population did not change
+### 6. Before reading a metric as improved, confirm its population did not change
 
 *The failure.* Three instances. `correct_abstention_rate = 1.000` while
 abstaining on 68% of answerable questions. Latency falling as concurrency rose.
@@ -875,7 +967,7 @@ reported by the very instrument built to prevent it.
 reading the numerator.** Put population size in your provenance tuple as a hard
 field.
 
-### 6. Reasoning written down is not reasoning executed
+### 7. Reasoning written down is not reasoning executed
 
 *The failure.* An alias-swap script contained a branch handling the exact case it
 died on — placed *after* the line that raises, so unreachable, and asserting
@@ -887,7 +979,7 @@ job referenced an action version that has never existed.
 **grep for the mechanism**. If its only occurrence is inside the sentence
 describing it, the sentence is fiction.
 
-### 7. Presence of a mechanism is not evidence of its invocation
+### 8. Presence of a mechanism is not evidence of its invocation
 
 *The failure.* Three instances. A pin verifier checking a file exists when the
 download guarantees it. A vendored-file check confirming presence rather than
@@ -897,7 +989,7 @@ image — while the call site was absent, so it never ran.
 *Detection heuristic:* check the **call site**, not the definition. "It is there"
 and "it is used" are different claims and only the second matters.
 
-### 8. Having a rule is not the same as reaching for it
+### 9. Having a rule is not the same as reaching for it
 
 *The failure.* The repository documented "rebuild, don't copy" — and a partial
 rebuild produced a misleading result four times. `ruff | tail` swallowed an exit
@@ -907,7 +999,7 @@ code three times, twice *by the person auditing for that defect*.
 **mechanism**, not more attention. `set -o pipefail`; never pipe a command whose
 exit status you read; put checks in files.
 
-### 9. Interpret survivors, do not count them
+### 10. Interpret survivors, do not count them
 
 *The failure.* After a fix, one provenance header survived. In aggregate: "1/9,
 unchanged" — a residual. Reading *that specific case* showed it named a genuinely
@@ -919,7 +1011,7 @@ case it belonged to was documented as "counted, not stripped" and was in fact
 a gap are identical in aggregate.** When a rate does not reach zero, ask of each
 remainder "is this the kind of thing I expected", not "how close did we get".
 
-### 10. An intermittent defect cannot be evaluated at small n
+### 11. An intermittent defect cannot be evaluated at small n
 
 *The failure.* Fence-leak rates moved 2/9 → 1/9 and 3/9 → 2/9 after a fix that
 **was never wired in**. At n=9, one occurrence is 11% of the rate. What settled
@@ -929,7 +1021,7 @@ it was `grep -c` on a log line returning **0**.
 the mechanism run? One log line answers what eighteen live queries could not.
 Only then read the rate.
 
-### 11. A negative-space claim requires a complete search
+### 12. A negative-space claim requires a complete search
 
 *The failure.* A dead-code audit reported eight unused configuration flags. All
 eight were live — some consumed by computed properties in a file the search
@@ -972,6 +1064,8 @@ to detect**.
 | 19 | A dead-code audit with an incomplete search path | The output looks like a finding, not an error | Verify a sample by hand before acting |
 | 20 | Documented behaviour the code does not perform | The documentation is confident and specific | Grep for the mechanism the sentence names |
 | 21 | A probe that reports "clean" when the request fails | Zero defects and zero data look identical | Make failures **raise**, never score as zero |
+| 22 | A migration or restore path that has never been run end to end | It runs rarely by construction, and its tests pass — often because they exercise only the refusal path | Ask when it last ran against something production-shaped. Then ask what the *happy* path does that its tests never make it do |
+| 23 | Deferring a decision onto a migration path you have not exercised | The deferral is recorded, tracked and looks like planning | For each deferred item, name the path that discharges it and the last time that path completed |
 
 ---
 
