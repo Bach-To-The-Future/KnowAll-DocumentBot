@@ -470,7 +470,8 @@ class QueryService:
         if answer == NO_ANSWER_MESSAGE:
             return answer
         outcome = output_guard.apply(answer, self._settings,
-                                     decline_message=NO_ANSWER_MESSAGE)
+                                     decline_message=NO_ANSWER_MESSAGE,
+                                     citations=prepared.citations)
         output_guard.log_counters(outcome, trace_id=prepared.trace["trace_id"])
         prepared.trace["output_guard"] = outcome.counters
         return outcome.text

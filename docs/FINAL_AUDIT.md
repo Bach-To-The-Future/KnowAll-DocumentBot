@@ -555,6 +555,50 @@ were not. `eval/baselines/README.md` already carried the warning — *"the code 
 the image matches git_sha (rebuild, don't docker compose cp)"* — which is the
 "having a rule is not reaching for it" rule, again.
 
+### P2-12 — an intermittent defect cannot be evaluated at small n
+
+The output-guard stage was committed **unwired**: defined, unit-tested, and
+never called. The browser probe then reported
+
+    fence   FR 2/9 -> 1/9      EN 3/9 -> 2/9
+
+which reads as a partial improvement. **There was no fix at all.** At n=9 a
+single occurrence is 11% of the rate, so one query landing differently is
+indistinguishable from a real effect — and both languages moved by exactly one.
+
+The general form: for an intermittent defect, a small-n before/after cannot
+separate a fix from variance, and the direction of the noise is as likely to
+flatter you as not. Two remedies, and the second is far cheaper:
+
+  * raise n until the confidence interval is narrower than the effect, or
+  * **verify MECHANICALLY rather than statistically** — did the mechanism run?
+
+Here the settling evidence was `grep -c "output guard corrected generation"`
+returning **0**. One log line answered what eighteen live queries could not.
+
+**Standing precondition for the rest of R2: no rate is reported until the
+corresponding guard has been observed firing in logs at least once. Mechanical
+evidence first, statistical evidence second.**
+
+### P2-13 — presence of a mechanism is not evidence of its invocation
+
+Third occurrence of one shape in this engagement:
+
+| # | what was checked | what mattered |
+|---|---|---|
+| 1 | the pinned model file **exists** in the cache | `snapshot_download` guarantees that; what mattered was **exclusivity** |
+| 2 | the vendored tessdata **is present** | whether tesseract **resolves** to it rather than a system copy |
+| 3 | `output_guard` **is importable** in the rebuilt image | whether `answer_prepared` **calls** it |
+
+In the third I ran `python -c "from services import output_guard; ..."` against
+the running container, saw it import and its function work, and treated that as
+proof the stage was live. The module was in the image. The call site was not.
+
+**The check must target the call site, not the definition.** For a library, that
+means asserting the caller invokes it; for a file, that the consumer resolves to
+it; for a pin, that no alternative is reachable. "It is there" and "it is used"
+are different claims, and only the second is ever the one you care about.
+
 ### P3-1 — `next@15.3.3` carries CVE-2025-66478
 
 Reported by `npm ci`. Not investigated further.

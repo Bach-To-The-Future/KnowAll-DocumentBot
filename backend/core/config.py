@@ -183,6 +183,24 @@ class Settings(BaseSettings):
     # generation that credits no passage IS a decline and is left alone.
     strip_appended_decline: bool = True
 
+    # P1-4. The generator writes "(Source: X, Page: Y)" into the visible answer,
+    # sometimes naming a document that was never retrieved. Mechanically
+    # checkable against the retrieved set, no model judgement.
+    #
+    # ASYMMETRIC BY DESIGN: strips only when the named source was NEVER
+    # retrieved (unambiguous fabrication). A real retrieved document with a
+    # disagreeing page number is COUNTED, not stripped — stripping is
+    # destructive and is reserved for failures that cannot be anything else.
+    strip_fabricated_headers: bool = True
+
+    # A run of two or more bare citation markers opening an answer, e.g.
+    # "[1] [2][3]" followed by the real answer. NOT covered by the
+    # malformed-generation guard, which only rejects a generation whose
+    # substantive content is empty — here the markers are a prefix on an
+    # otherwise substantial answer, so that guard passes it.
+    # Requires TWO OR MORE: "[1] According to..." is the correct form.
+    strip_leading_citation_run: bool = True
+
     # Finding #28 — semantic-drift guard on query rewrite. A rewrite whose
     # cosine similarity to the original question falls below this is discarded
     # and the original is used. Deliberately LOW: this is a safety net against

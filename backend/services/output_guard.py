@@ -208,8 +208,86 @@ def strip_appended_decline(text: str, decline_message: str) -> tuple[str, int]:
     return cleaned, text.count(decline_message)
 
 
+_HEADER = re.compile(r"\(\s*Source\s*:\s*([^,)]+?)\s*(?:,\s*Page\s*:\s*([^)]*?))?\s*\)",
+                     re.IGNORECASE)
+_LEADING_CITATIONS = re.compile(r"^\s*(?:\[\s*\d+\s*\]\s*){2,}")
+
+
+def strip_leading_citation_run(text: str) -> tuple[str, int]:
+    """Remove a run of bare citation markers opening an answer.
+
+    Observed: `[1] [2][3]\\n\\nI. Politique de conservation...` — the answer
+    begins with markers attached to nothing.
+
+    NOT COVERED BY D5. The malformed-generation guard rejects a generation whose
+    SUBSTANTIVE content is empty, so it catches `[1] [1][3]` when that is the
+    WHOLE answer. Here the markers are a prefix on an otherwise substantial
+    answer, so D5 passes it and the noise reaches the user.
+
+    Deliberately requires TWO OR MORE adjacent markers. `[1] According to the
+    policy...` is the normal, correct form and must survive; two or more markers
+    with nothing between them attribute nothing to anything.
+    """
+    match = _LEADING_CITATIONS.match(text)
+    if not match:
+        return text, 0
+    return text[match.end():].lstrip(), 1
+
+
+def check_fabricated_headers(text: str, citations: list[dict]) -> tuple[str, int]:
+    """P1-4. A provenance header in prose must match something retrieved.
+
+    Mechanically checkable, with no model judgement: `(Source: X, Page: Y)`
+    either corresponds to a chunk that was actually retrieved or it does not.
+
+    THREE OUTCOMES, and only one of them strips:
+
+      source retrieved, page agrees     legitimate. build_prompt() renders this
+                                        header above every passage, so the model
+                                        copying it is faithful, not fabrication.
+                                        Left alone.
+      source NEVER retrieved            unambiguous fabrication — the model
+                                        invented a document. STRIPPED.
+      source retrieved, page differs    AMBIGUOUS. The document is real and was
+                                        in the context; the page may be a
+                                        transcription slip or may be an
+                                        invention. COUNTED, NOT STRIPPED.
+
+    The asymmetry is deliberate. Stripping is destructive and irreversible from
+    the user's side, so it is reserved for the case where the failure cannot be
+    anything else. A wrong page number on a real document is still wrong, but it
+    is reported rather than silently rewritten — and the counter makes it
+    visible rather than leaving it to be inferred.
+    """
+    if not text:
+        return text, 0
+
+    known: dict[str, set[str]] = {}
+    for citation in citations:
+        source = str(citation.get("source", "")).strip().casefold()
+        if not source:
+            continue
+        page = citation.get("page_number")
+        known.setdefault(source, set()).add("" if page is None else str(page).strip())
+
+    fabricated: list[str] = []
+    for match in _HEADER.finditer(text):
+        source = (match.group(1) or "").strip().casefold()
+        if source not in known:
+            fabricated.append(match.group(0))
+
+    if not fabricated:
+        return text, 0
+
+    cleaned = text
+    for header in fabricated:
+        cleaned = cleaned.replace(header, "")
+    return _collapse(cleaned), len(fabricated)
+
+
 def _enabled_checks(settings: Settings,
-                    decline_message: str = "") -> list[tuple[str, Check]]:
+                    decline_message: str = "",
+                    citations: list[dict] | None = None) -> list[tuple[str, Check]]:
     """Checks in run order, filtered by their reversibility flags."""
     checks: list[tuple[str, Check]] = []
     if settings.strip_output_scaffolding:
@@ -220,11 +298,17 @@ def _enabled_checks(settings: Settings,
         # function of the text.
         checks.append(("appended_decline",
                        lambda t: strip_appended_decline(t, decline_message)))
+    if settings.strip_fabricated_headers:
+        checks.append(("fabricated_header",
+                       lambda t: check_fabricated_headers(t, citations or [])))
+    if settings.strip_leading_citation_run:
+        checks.append(("leading_citations", strip_leading_citation_run))
     return checks
 
 
 def apply(text: str, settings: Settings, *,
-          decline_message: str = "") -> GuardOutcome:
+          decline_message: str = "",
+          citations: list[dict] | None = None) -> GuardOutcome:
     """Run the stage over a completed generation.
 
     Returns the (possibly rewritten) text plus counters. Callers log the
@@ -232,7 +316,7 @@ def apply(text: str, settings: Settings, *,
     """
     counters: dict[str, int] = {}
     current = text
-    for name, check in _enabled_checks(settings, decline_message):
+    for name, check in _enabled_checks(settings, decline_message, citations):
         current, found = check(current)
         counters[name] = found
     return GuardOutcome(current, counters)

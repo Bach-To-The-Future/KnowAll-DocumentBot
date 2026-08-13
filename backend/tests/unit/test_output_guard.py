@@ -83,12 +83,22 @@ def test_counters_report_what_fired() -> None:
     assert outcome.fired == ["scaffolding"]
 
 
+ALL_CHECK_FLAGS = tuple(
+    name for name in Settings.model_fields if name.startswith("strip_")
+)
+
+
 def test_a_clean_generation_reports_nothing_fired() -> None:
     """Every enabled check reports a zero, so "ran and found nothing" is
-    distinguishable from "did not run" — which is the distinction that made the
-    unwired stage invisible."""
+    distinguishable from "did not run" — the distinction that made the unwired
+    stage invisible.
+
+    Derives the check set rather than enumerating it: an earlier version listed
+    the checks by name and broke on every legitimate addition, which is the
+    brittleness pattern this engagement filed as P2-9.
+    """
     outcome = apply("[1] A clean answer.", settings())
-    assert set(outcome.counters) == {"scaffolding", "appended_decline"}
+    assert len(outcome.counters) == len(ALL_CHECK_FLAGS)
     assert all(v == 0 for v in outcome.counters.values())
     assert outcome.fired == []
 
@@ -100,9 +110,9 @@ def test_DISABLING_REPRODUCES_PRIOR_BEHAVIOUR_BYTE_FOR_BYTE() -> None:
     same", byte-identical — so that turning it off is a config change rather
     than a revert.
     """
-    text = "Answer. <<<PASSAGE 1>>>  <<<END PASSAGE 1>>>  trailing   spaces."
-    outcome = apply(text, settings(strip_output_scaffolding=False,
-                                   strip_appended_decline=False))
+    text = "[1] [2][3] Answer. <<<PASSAGE 1>>>  trailing   spaces. (Source: x.pdf)"
+    outcome = apply(text, settings(**{flag: False for flag in ALL_CHECK_FLAGS}),
+                    decline_message=DECLINE, citations=[])
     assert outcome.text == text
     assert outcome.counters == {}
     assert outcome.fired == []
@@ -115,8 +125,14 @@ def test_each_check_is_reversible_INDEPENDENTLY() -> None:
     that misbehaves without losing the rest.
     """
     text = "Answer. <<<PASSAGE 1>>>  trailing   spaces."
-    outcome = apply(text, settings(strip_appended_decline=False))
-    assert set(outcome.counters) == {"scaffolding"}
+    for flag in ALL_CHECK_FLAGS:
+        outcome = apply(text, settings(**{flag: False}),
+                        decline_message=DECLINE, citations=[])
+        assert len(outcome.counters) == len(ALL_CHECK_FLAGS) - 1, (
+            f"disabling {flag} must remove exactly one check")
+    # and the scaffolding check still works while another is disabled
+    outcome = apply(text, settings(strip_appended_decline=False),
+                    decline_message=DECLINE, citations=[])
     assert "<<<" not in outcome.text
 
 
@@ -279,3 +295,103 @@ def test_THE_STAGE_IS_ACTUALLY_REACHED_FROM_THE_ANSWER_PATH() -> None:
     assert "_guard_output" in source, (
         "answer_prepared must call _guard_output; defining it is not enough."
     )
+
+
+# --- R2 step 5: fabricated provenance headers, and the citation-only prefix --
+
+RETRIEVED = [
+    {"index": 1, "source": "cr-francais.pdf", "page_number": 1, "text": "..."},
+    {"index": 2, "source": "System Design Concepts.docx", "page_number": 3, "text": "..."},
+]
+
+
+def test_A_HEADER_NAMING_AN_UNRETRIEVED_DOCUMENT_IS_STRIPPED() -> None:
+    """The observed case, verbatim from the manual French sample: the answer
+    cited `(Source: ABC DELF junior A2.pdf, Page: 114)` for a question about a
+    retention policy, naming a document not in the retrieved set."""
+    text = ("[1] Le plafond est de soixante mille euros. "
+            "(Source: ABC DELF junior A2.pdf, Page: 114) et voila.")
+    cleaned, found = output_guard.check_fabricated_headers(text, RETRIEVED)
+    assert found == 1
+    assert "ABC DELF" not in cleaned
+    assert "soixante mille euros" in cleaned
+
+
+def test_a_header_matching_a_retrieved_document_is_LEFT_ALONE() -> None:
+    """build_prompt() renders this header above every passage, so a model
+    copying it is being faithful, not fabricating."""
+    text = "[1] Dix ans. (Source: cr-francais.pdf, Page: 1)"
+    cleaned, found = output_guard.check_fabricated_headers(text, RETRIEVED)
+    assert found == 0
+    assert cleaned == text
+
+
+def test_a_REAL_document_with_a_WRONG_PAGE_is_counted_not_stripped() -> None:
+    """The ambiguous case, and the reason the check is asymmetric.
+
+    The document is real and WAS in the context; the page may be a
+    transcription slip or an invention. Stripping is destructive and
+    irreversible from the user's side, so it is reserved for failures that
+    cannot be anything else.
+    """
+    text = "[1] Dix ans. (Source: cr-francais.pdf, Page: 99)"
+    cleaned, found = output_guard.check_fabricated_headers(text, RETRIEVED)
+    assert found == 0, "a real source with a wrong page must not be stripped"
+    assert cleaned == text
+
+
+def test_no_citations_means_every_header_is_fabricated() -> None:
+    text = "The answer is 7. (Source: invented.pdf, Page: 2)"
+    cleaned, found = output_guard.check_fabricated_headers(text, [])
+    assert found == 1
+    assert "invented.pdf" not in cleaned
+
+
+def test_a_clean_answer_is_untouched_by_the_header_check() -> None:
+    text = "[1] The retention period is seven years."
+    cleaned, found = output_guard.check_fabricated_headers(text, RETRIEVED)
+    assert found == 0
+    assert cleaned == text
+
+
+# --- the citation-only prefix ------------------------------------------------
+
+def test_the_citation_only_prefix_is_removed() -> None:
+    """Observed: `[1] [2][3]\n\nI. Politique de conservation...`"""
+    text = "[1] [2][3]\n\nI. Politique de conservation des documents."
+    cleaned, found = output_guard.strip_leading_citation_run(text)
+    assert found == 1
+    assert cleaned.startswith("I. Politique")
+
+
+def test_a_SINGLE_leading_citation_is_the_CORRECT_form_and_survives() -> None:
+    """`[1] According to the policy...` is what the prompt asks for. Requiring
+    two or more markers is what separates noise from the intended form."""
+    text = "[1] According to the policy, seven years."
+    cleaned, found = output_guard.strip_leading_citation_run(text)
+    assert found == 0
+    assert cleaned == text
+
+
+def test_D5_ALONE_DOES_NOT_CATCH_THE_PREFIX() -> None:
+    """Why this needs its own check.
+
+    The malformed-generation guard rejects a generation whose SUBSTANTIVE
+    content is empty, so it catches `[1] [1][3]` when that is the whole answer.
+    With real prose after the markers, substance is large and D5 passes it —
+    the noise reaches the user.
+    """
+    from services.query import substantive_text
+    whole_answer = "[1] [1][3]"
+    prefixed = "[1] [2][3]\n\nI. Politique de conservation des documents."
+    assert substantive_text(whole_answer) == ""        # D5 rejects this
+    assert len(substantive_text(prefixed)) > 20        # D5 passes this
+
+
+def test_the_new_checks_are_reversible() -> None:
+    text = "[1] [2][3]\n\nAnswer. (Source: invented.pdf, Page: 2)"
+    outcome = apply(text, settings(strip_fabricated_headers=False,
+                                   strip_leading_citation_run=False),
+                    citations=RETRIEVED)
+    assert "invented.pdf" in outcome.text
+    assert outcome.text.startswith("[1] [2][3]")
