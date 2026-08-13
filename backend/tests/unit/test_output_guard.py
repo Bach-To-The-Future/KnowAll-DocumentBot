@@ -463,3 +463,45 @@ def test_a_fabricated_source_is_not_double_counted_as_a_page_mismatch() -> None:
     _, fabricated = output_guard.check_fabricated_headers(text, RETRIEVED)
     assert mismatches == 0
     assert fabricated == 1
+
+
+# --- the malformed-fence regression (final verification run) -----------------
+
+MALFORMED = [
+    # Observed VERBATIM in a French answer during end-to-end verification, with
+    # the guard reporting scaffolding: 0 while all three reached the user.
+    "<<<PASSAGE 1>> [1]  <<<PASSAGE 2>> [2][3]  <<<PASSAGE 3>> [3]",
+    "<<<PASSAGE 1> and then the answer",
+    "<<<END PASSAGE 2>> trailing text",
+    "<<<DATA supplied by user>> more",
+]
+
+
+@pytest.mark.parametrize("text", MALFORMED)
+def test_a_TRUNCATED_fence_is_still_stripped(text) -> None:
+    """The model reproduces the fence imperfectly, so the closing run is
+    tolerant. Requiring exactly `>>>` let two-bracket forms through."""
+    cleaned, found = strip_scaffolding(text)
+    assert found >= 1
+    assert "<<<" not in cleaned
+
+
+def test_the_exact_observed_leak_is_fully_removed() -> None:
+    """Verbatim from the run, and nothing but citation markers should survive."""
+    text = "<<<PASSAGE 1>> [1]  <<<PASSAGE 2>> [2][3]  <<<PASSAGE 3>> [3]"
+    cleaned, found = strip_scaffolding(text)
+    assert found == 3
+    assert "PASSAGE" not in cleaned
+    assert "[1]" in cleaned and "[3]" in cleaned
+
+
+def test_two_opening_brackets_are_still_NOT_scaffolding() -> None:
+    """The tolerance is on the CLOSING run only. `<<<` identifies scaffolding,
+    so ordinary content with `<<` must survive — otherwise loosening the close
+    would start eating document text."""
+    for text in ("[1] In C++ you write std::vector<<int>> only by mistake.",
+                 "[1] The shift operator a << b << c is not a fence.",
+                 "[1] Compare a<<b and c>>d in one sentence."):
+        cleaned, found = strip_scaffolding(text)
+        assert found == 0, text
+        assert cleaned == text

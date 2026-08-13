@@ -74,12 +74,31 @@ logger = logging.getLogger(__name__)
 # The containment fences (services/passage_guard.py) and the sanitizer's own
 # replacement token. These are OURS: they exist to structure the prompt, and
 # their appearance in output is always a defect, never content.
+# THE CLOSING DELIMITER IS DELIBERATELY TOLERANT, and that is the whole point.
+#
+# The model reproduces the fence IMPERFECTLY. The first version of this pattern
+# required exactly `>>>`, having been written against the forms observed at the
+# time. A later end-to-end run produced
+#
+#     <<<PASSAGE 1>> [1]  <<<PASSAGE 2>> [2][3]  <<<PASSAGE 3>> [3]
+#
+# — TWO closing brackets — and every one reached the user while the guard
+# reported `scaffolding: 0`. It ran; it simply did not match.
+#
+# The earlier fix had handled `<<<DATA supplied by user>>` with `>?>?>?`, on
+# that alternative alone: the specific malformed instance observed was patched
+# instead of the class it belonged to. A garbled reproduction can truncate ANY
+# of these forms, so the opening `<<<` is what identifies scaffolding and the
+# closing run is allowed to be short.
+#
+# `<<<` (three) still identifies it, so document content like
+# `std::vector<<int>>` — two opening brackets — is untouched. A test pins that.
 _SCAFFOLDING = re.compile(
-    r"<<<\s*/?\s*(?:END\s+)?PASSAGE[^>]*>>>"      # <<<PASSAGE 1>>>, <<<END PASSAGE 1>>>
-    r"|<<<[^>\n]{0,80}>>>"                        # any other triple-angle fence
-    r"|<<<DATA[^>\n]{0,80}>?>?>?"                 # the malformed forms models emit
-    r"|\[removed:\s*injection-shaped content\]"   # the sanitizer's placeholder
-    r"|-{2,}\s*END\s+PASSAGE\s*-{2,}"             # the dashed form
+    r"<<<\s*/?\s*(?:END\s+)?PASSAGE[^>\n]{0,40}>{1,3}"   # <<<PASSAGE 1>>>, >>, >
+    r"|<<<\s*DATA[^>\n]{0,80}>{0,3}"                     # <<<DATA supplied by user>>
+    r"|<<<[^>\n]{0,80}>{1,3}"                            # any other triple-angle fence
+    r"|\[removed:\s*injection-shaped content\]"          # the sanitizer's placeholder
+    r"|-{2,}\s*END\s+PASSAGE\s*-{2,}"                    # the dashed form
     r"|END\s+OF\s+UNTRUSTED\s+CONTENT",
     re.IGNORECASE,
 )
