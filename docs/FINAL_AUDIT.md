@@ -698,6 +698,36 @@ A file is diffable, lintable, testable and quoted exactly once. An inline check
 is quoted by the shell, then by the language, then sometimes by YAML — and each
 layer can silently change its meaning rather than refusing it.
 
+### P2-18 — a fix that targets the observed instance rather than its class
+
+The output guard stripped containment scaffolding from generated answers. The
+audit produced one malformed form — `<<<DATA supplied by user>>`, with **two**
+closing brackets instead of three — and the fix handled it with `>?>?>?` **on
+that alternative alone**.
+
+Every other fence form kept requiring exactly `>>>`. Two phases later, an
+end-to-end run produced
+
+    <<<PASSAGE 1>> [1]  <<<PASSAGE 2>> [2][3]  <<<PASSAGE 3>> [3]
+
+— the same two-bracket truncation, on a different alternative. All three reached
+the user, and **the guard reported `scaffolding: 0`**. It ran; it did not match.
+
+The sample was treated as the defect. It was an instance of one: *the model
+reproduces the fence imperfectly, and any form can be truncated.* Fixing the
+sample left the class unguarded, and the guard's own counter then reported
+success while the defect shipped.
+
+Unit tests could not catch this, and it is worth being precise about why: the
+fixtures were written **from the forms already observed**, so they were
+guaranteed to pass. A test suite derived from known failures cannot discover an
+unknown one.
+
+**Detection heuristic:** after fixing from a sample, ask **"what else has this
+shape?"** and construct one. If the sample was malformed, ask what other things
+malform. If it was a truncation, ask what else truncates. Then test *that*,
+before the sample convinces you the class is closed.
+
 ### P3-1 — `next@15.3.3` carries CVE-2025-66478
 
 Reported by `npm ci`. Not investigated further.

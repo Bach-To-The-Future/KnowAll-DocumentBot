@@ -573,9 +573,28 @@ something no commit can fix, or invite softening the gate on its first execution
 embedding-model identity, golden-set schema, rewrite-branch agreement and
 retrieval determinism on PRs; nightly full mode reporting spread without gating.
 
-**Metric-regression comparison is INACTIVE.** No baseline is both
-provenance-complete and drawn from real documents, so the job warns rather than
-passing silently.
+**Metric-regression comparison is INACTIVE, and now has a second reason.**
+
+The original reason stands: no baseline is both provenance-complete and drawn
+from real documents, so the job warns rather than passing silently.
+
+**The gate is now also referenceless.** All four committed baselines predate the
+R4 provenance fields, so the comparator correctly **refuses to diff any of
+them** against a current run:
+
+    REFUSING TO DIFF — these baselines do not measure the same thing:
+      n_answerable: old None -> new 15
+      enable_ocr:   old None -> new True
+
+That refusal is right — a baseline that never recorded its denominators cannot
+be shown to measure the same population. But the consequence is that the gate is
+**configured, correct, and has nothing to compare against.**
+
+Recording a fresh baseline is blocked on open question 3: the eval corpus cannot
+be ingested by the code that ships, so a reference baseline cannot currently be
+produced from a clean environment. **This is a live gap, not a cleanup task** —
+until it is closed, retrieval quality is protected by nothing automatic, and
+comparisons must be made by value against numbers recorded in this document.
 
 ---
 
@@ -838,7 +857,43 @@ serves. Schedule it, do not sneak it.
 is not a candidate of this alias and refuses one the alias points at. Previously
 a failed swap left a verified candidate with no removal path but the raw API.
 
-**3. If the incumbent is kept, do the container limits still hold?**
+**3. The eval corpus cannot be ingested by the code that ships. (R5 — proposed,
+not implemented.)**
+
+`eval/ingest_corpus.py` fails on the committed tier-B corpus:
+
+    b04-wide-row.csv -> 1 chunk, 13,308 chars, ~4,828 tokens
+                        against a 2,048-token embedding limit
+
+**The irony is exact.** That fixture was authored to prove finding #19's
+oversized-row path was reachable — and the guard built for #19 now refuses to
+ingest it. It is the only tier-B document over the limit. A single CSV row is
+wider than `table_chunk_char_budget`, and row-based chunking cannot split
+*within* a row, so the budget is unenforceable for it and the guard correctly
+declines rather than admit a silently-truncated vector.
+
+**Consequence: every committed baseline was produced against a collection
+today's code cannot create.** The eval collection was built before the
+token-budget guard landed and has never been rebuilt from scratch. Nobody
+noticed because nobody ever built it from nothing.
+
+*Three options, and the third is wrong:*
+
+| option | cost |
+|---|---|
+| **split oversized rows at chunking** | changes stored text for every wide table → invalidates every baseline → needs a reindex. R5, retrieval-quality. |
+| **exclude the file from ingestion, keep it as a unit fixture** | corpus manifest changes (a hard provenance field), so baselines still become incomparable — but no stored text moves and no reindex is needed. The fixture keeps proving the boundary is reachable, which is its job. |
+| ~~raise the boundary~~ | **wrong.** 2,048 is the model's real limit; raising it reinstates silent truncation, which is finding #19 itself. |
+
+**Recommendation: option 2.** The fixture's purpose is to demonstrate that the
+oversized-row path is reachable, and it still does that as a unit fixture — it
+does not need to be *in the index* to prove it. Option 1 is a retrieval-quality
+change made to accommodate a test document, which is the tail wagging the dog,
+and it should be taken on its own merits if wide-table chunking is genuinely
+wrong. Both options invalidate the baselines, so neither is cheap; option 2 at
+least does not move stored text.
+
+**4. If the incumbent is kept, do the container limits still hold?**
 They have been re-derived from measurement rather than reverted: api 3→5 GiB,
 ollama 8→4 GiB, worker 4→2 GiB, declared total 15.5→11.5 GiB against an
 11.68 GiB host. The old values were all sized for a candidate or for nothing at

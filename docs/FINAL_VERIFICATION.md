@@ -5,7 +5,7 @@ dependency bumps including a starlette major, four R1 guards, the R2 output
 pipeline, new provenance fields, and the memory and concurrency changes — run
 together for the first time.
 
-**Five findings. Three fixed, two filed.** The assembled system did not come up
+**Five findings. Four fixed, one filed with a proposal.** The assembled system did not come up
 clean, which was the expected result and the reason for running it.
 
 ---
@@ -182,7 +182,7 @@ because every prior eval ran in a tree that already had the files.
 
 Verified by cloning fresh: `corpus OK: 13 documents verified`.
 
-### F3 — the eval corpus cannot be ingested by the code that ships · FILED
+### F3 — the eval corpus cannot be ingested by the code that ships · FILED, PROPOSED
 
     b04-wide-row.csv -> 1 chunk, 13,308 chars, ~4,828 tokens
                         against a 2,048-token embedding limit
@@ -197,10 +197,19 @@ the whole time because the eval collection was never rebuilt from scratch after
 the token-budget guard landed. **Every baseline in `eval/baselines/` was produced
 against a collection today's code refuses to create.**
 
-Not fixed: the options are a chunking change (retrieval quality, R5) or a corpus
-change (invalidates every baseline). Both need a proposal.
+The irony is exact: **that fixture was authored to prove finding #19's
+oversized-row path was reachable, and the guard built for #19 now refuses to
+ingest it.**
 
-### F4 — `up -d --wait` reports healthy before the system can serve · FILED
+Not fixed. Three options — split oversized rows at chunking (R5, changes stored
+text, invalidates every baseline); exclude the file from ingestion while keeping
+it as a unit fixture (manifest changes, so baselines still become incomparable,
+but no stored text moves and no reindex is needed); or raise the boundary, which
+is **wrong** — 2,048 is the model's real limit and raising it reinstates the
+silent truncation that is finding #19 itself. **Recommended: option 2**, with the
+reasoning in `HANDOFF.md` open question 3. Not acted on.
+
+### F4 — `up -d --wait` reports healthy before the system can serve · FIXED `9f821b3`
 
     docker compose up -d --wait   ->  exit 0, 7/7 "Healthy"
     ollama list                   ->  llama3.2:1b ABSENT
@@ -212,13 +221,27 @@ passes as soon as the server answers, not when models exist. The documented
 scripting a deploy on health status, or restarting onto a fresh volume hits it.
 Same shape as the `/ready` finding: a health signal reporting on the wrong thing.
 
-### F5 — the generator-identity guard is a no-op during the pull window · FILED
+### F5 — the generator-identity guard is a no-op during the pull window · FIXED `9f821b3`
 
     WARNING:core.model_identity:Ollama does not list model 'llama3.2:1b'; digest unknown.
 
 Non-fatal by design, but it means that on a cold start the guard cannot compare a
 digest it could not read — inactive during exactly the window when a fresh deploy
-is most likely to have pulled something new.
+is most likely to have pulled something new. **A guard that passes because the
+thing it checks is not loaded yet is presence-not-invocation in a new location.**
+
+**Fix (shared with F4).** Readiness now includes model availability: the
+healthcheck requires both models to be resident, using the same pair the
+entrypoint already hardcodes, with `start_period` raised 30s → 900s so that a
+cold ~1.6 GB pull is treated as *expected* rather than *broken*. Forced both
+ways:
+
+    model removed  -> "starting"  (never "healthy", so --wait BLOCKS)
+    model restored -> "healthy"   (--wait returns)
+
+The difference that matters: a user now sees the stack wait, instead of being
+told it is ready and getting a 502 on the first question. The identity guard now
+runs when a digest exists to read.
 
 ### Also recorded: no committed baseline is comparable any more
 
@@ -230,9 +253,10 @@ comparator now **refuses to diff** any of them against a current run:
       enable_ocr:   old None -> new True
 
 That is correct — a baseline that never recorded its denominators cannot be shown
-to measure the same population — but it means the regression gate has **no
-reference point** until a fresh baseline is recorded. Metrics were compared by
-value instead, and are identical.
+to measure the same population — but it means the regression gate is
+**configured, correct, and referenceless**. Recording a fresh baseline is blocked
+on F3. Metrics were compared by value instead, and are identical. Carried into
+`HANDOFF.md` as a live gap, not a cleanup task.
 
 ---
 
