@@ -51,6 +51,34 @@ Field classes — deliberately small and explicit:
   generation model rewrites and expands queries differently, which changes
   retrieval INPUTS; that is a different system, not drift, so it is HARD. In
   retrieval mode the LLM is out of the loop entirely and it is cosmetic.
+
+  The GENERATION FLAGS and require_support_quotes are conditional the same way:
+  semantic (and, for require_support_quotes, hard) in full mode; cosmetic in
+  retrieval mode, where the LLM never runs.
+
+HOW THIS TUPLE GREW, AND WHAT THAT SAYS ABOUT IT
+
+Four fields have been added after a defect exposed their absence, never by
+review:
+
+  n_answerable / n_unanswerable   a false +0.185 "improvement" over a
+                                  denominator that had changed by a third
+  max_concurrent_queries          moved 4 -> 1 and would have passed silently
+  enable_ocr / ocr_languages /    change the TEXT EXTRACTED from scanned PDFs,
+  ocr_dpi                         therefore the stored vectors — exactly as
+                                  chunk_size does, and chunk_size was always
+                                  hard
+  the generation + strip_* flags   change the answer, which full mode measures
+
+**The comparator only catches drift in fields someone thought to include.** It
+is a checklist, not a detector, and every gap in it so far was found by being
+bitten rather than by reading it. `test_every_recorded_field_is_classified_
+SOMEWHERE` closes the specific failure mode — a field recorded but classified
+nowhere, and therefore silent — but it cannot close the general one: a field
+that is neither recorded nor classified is invisible to that test too.
+
+When something surprising survives a change, check whether the tuple describes
+it before concluding the change worked.
 """
 from __future__ import annotations
 
@@ -80,7 +108,40 @@ _HARD_BASE = (
     # comparison — see the module docstring.
     "n_answerable",
     "n_unanswerable",
+    # R3. OCR settings change the TEXT EXTRACTED from scanned PDFs, therefore
+    # the stored vectors, therefore what any eval measures — exactly as
+    # chunk_size does, and chunk_size has always been hard.
+    #
+    # corpus_manifest_sha256 does NOT cover this: it hashes the SOURCE files,
+    # not the text extracted from them. Two baselines taken across an
+    # ocr_dpi change would have compared as COMPARABLE while measuring
+    # different corpora.
+    "enable_ocr",
+    "ocr_languages",
+    "ocr_dpi",
 )
+
+# Flags that change the ANSWER but never the retrieval. In full mode the
+# generator is in the loop, so these move what is measured; in retrieval mode
+# the LLM never runs and they cannot have moved a single number. Same
+# conditional treatment `llm_model` already had — see classify_fields().
+_GENERATION_FLAGS = (
+    "llm_num_ctx",
+    "llm_temperature",
+    "llm_num_predict",
+    "llm_enable_thinking",
+    "min_answer_chars",
+    "rewrite_min_similarity",
+    "strip_output_scaffolding",
+    "strip_appended_decline",
+    "strip_fabricated_headers",
+    "strip_leading_citation_run",
+)
+
+# HARD rather than semantic, and only in full mode: MEASURED to collapse
+# answering from 13/15 to 2/15 on the shipped generator. A run with it on and a
+# run with it off are not the same system being compared, they are two systems.
+_FULL_MODE_HARD = ("require_support_quotes",)
 
 _SEMANTIC_BASE = (
     "reranker_model",
@@ -120,8 +181,16 @@ def classify_fields(eval_mode: str) -> tuple[tuple[str, ...], tuple[str, ...], t
     never runs).
     """
     if eval_mode == FULL_MODE:
-        return (*_HARD_BASE, "llm_model"), _SEMANTIC_BASE, _COSMETIC_BASE
-    return _HARD_BASE, _SEMANTIC_BASE, (*_COSMETIC_BASE, "llm_model")
+        return (
+            (*_HARD_BASE, "llm_model", *_FULL_MODE_HARD),
+            (*_SEMANTIC_BASE, *_GENERATION_FLAGS),
+            _COSMETIC_BASE,
+        )
+    return (
+        _HARD_BASE,
+        _SEMANTIC_BASE,
+        (*_COSMETIC_BASE, "llm_model", *_GENERATION_FLAGS, *_FULL_MODE_HARD),
+    )
 
 
 def _git_sha() -> str:
@@ -192,6 +261,20 @@ def build(
         "enable_answer_cache": settings.enable_answer_cache,
         "llm_model": settings.llm_model,
         "max_concurrent_queries": settings.max_concurrent_queries,
+        "enable_ocr": settings.enable_ocr,
+        "ocr_languages": settings.ocr_languages,
+        "ocr_dpi": settings.ocr_dpi,
+        "llm_num_ctx": settings.llm_num_ctx,
+        "llm_temperature": settings.llm_temperature,
+        "llm_num_predict": settings.llm_num_predict,
+        "llm_enable_thinking": settings.llm_enable_thinking,
+        "min_answer_chars": settings.min_answer_chars,
+        "rewrite_min_similarity": settings.rewrite_min_similarity,
+        "require_support_quotes": settings.require_support_quotes,
+        "strip_output_scaffolding": settings.strip_output_scaffolding,
+        "strip_appended_decline": settings.strip_appended_decline,
+        "strip_fabricated_headers": settings.strip_fabricated_headers,
+        "strip_leading_citation_run": settings.strip_leading_citation_run,
         "reranker_revision": os.getenv("KNOWALL_RERANKER_REVISION") or "unpinned",
         "bm25_revision": os.getenv("KNOWALL_BM25_REVISION") or "unpinned",
         "git_sha": _git_sha(),

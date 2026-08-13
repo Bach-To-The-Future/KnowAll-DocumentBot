@@ -624,6 +624,80 @@ what is left.
 Corollary: when a rate does not go to zero, the useful question is not "how
 close did we get" but "is each remainder the same kind of thing I expected".
 
+### P2-15 — a checklist only catches what someone thought to list
+
+The provenance comparator has now gained four fields, and **every one was added
+after a defect exposed its absence — none by review**:
+
+| field | how the gap was found |
+|---|---|
+| `n_answerable` / `n_unanswerable` | a false +0.185 "improvement" over a denominator that had changed by a third |
+| `max_concurrent_queries` | moved 4 → 1 and would have passed silently |
+| `enable_ocr` / `ocr_languages` / `ocr_dpi` | noticed while auditing flags: they change extracted text, therefore stored vectors, exactly as `chunk_size` does |
+| generation + `strip_*` flags | same audit; they change the answer, which full mode measures |
+
+The comparator presents as a **detector** and is a **checklist**. It refuses to
+diff runs that differ in a field it models, and says nothing about runs that
+differ in a field it does not. Its coverage is a record of what previous people
+were bitten by.
+
+A test now asserts every field *recorded* in the tuple is *classified*
+somewhere, closing the specific mode where a field is captured but silent. It
+cannot close the general one: a field neither recorded nor classified is
+invisible to that test too.
+
+**Detection heuristic:** when something surprising survives a change, check
+whether the instrument models the thing that surprised you before concluding the
+change worked.
+
+### P2-16 — a dead-code audit with an incomplete search path manufactures dead code
+
+The flag audit reported eight dead config flags. **All eight were live.** Four
+were consumed by `computed_field` properties inside `config.py`, which the
+search excluded; three lived in `extraction/`, which the search never visited.
+
+This is the mirror of *presence-is-not-invocation* (P2-13) and worse in one
+respect: **the output looks like a finding rather than an error.** "Eight unused
+flags after a long remediation" is entirely plausible — it is the kind of thing
+an audit is supposed to turn up — and acting on it would have deleted working
+configuration.
+
+The audit's own progression is the whole lesson:
+
+    run 1   70 of 70 flags dead    IMPOSSIBLE — self-caught on shape alone
+    run 2    8 of 70 flags dead    PLAUSIBLE — and wrong
+    run 3    0 of 70 flags dead    correct
+
+Run 1 was caught for free, because nothing about it could be true. Run 2 had to
+be disproved by hand, one flag at a time. **A tool's plausible answer costs more
+to check than its absurd one**, so the absurd result is the lucky case.
+
+**Before believing a negative-space claim — unused, unreachable, uncovered,
+orphaned — confirm the search covered everywhere the thing could have been.**
+
+### P2-17 — a check embedded in shell syntax fails as a check before it fails as a command
+
+Three occurrences in this engagement:
+
+1. a `grep` pattern using `|` alternation without `-E`, so BRE read it as a
+   literal pipe and every count came back zero
+2. a heredoc that mangled `
+` inside an f-string, breaking a Python file
+3. a heredoc whose `EOF` inside a YAML `run:` scalar broke the workflow's parse
+
+Each began as a legitimate check and was destroyed by the quoting layer between
+it and the interpreter — and in the first case it did not error at all, it
+returned confident, wrong numbers.
+
+The fix is the one reached for after the second heredoc and it should have been
+the first: **put the check in a file.** `scripts/summarise_trivy.py` and
+`api/verify_tessdata.py` both exist because an inline version broke;
+`api/verify_model_pins.py` was written that way from the start after finding #25.
+
+A file is diffable, lintable, testable and quoted exactly once. An inline check
+is quoted by the shell, then by the language, then sometimes by YAML — and each
+layer can silently change its meaning rather than refusing it.
+
 ### P3-1 — `next@15.3.3` carries CVE-2025-66478
 
 Reported by `npm ci`. Not investigated further.

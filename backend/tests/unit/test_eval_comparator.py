@@ -330,3 +330,93 @@ def test_the_admission_ceiling_is_cosmetic_not_silent() -> None:
     assert verdict == COSMETIC
     assert [row[0] for row in cosmetic] == ["max_concurrent_queries"]
     assert not hard and not semantic
+
+
+# --- R4: the two provenance gaps closed --------------------------------------
+
+OCR_FIELDS = ["enable_ocr", "ocr_languages", "ocr_dpi"]
+GENERATION_FIELDS = [
+    "llm_num_ctx", "llm_temperature", "llm_num_predict", "llm_enable_thinking",
+    "min_answer_chars", "rewrite_min_similarity", "strip_output_scaffolding",
+    "strip_appended_decline", "strip_fabricated_headers",
+    "strip_leading_citation_run",
+]
+
+
+@pytest.mark.parametrize("field,value", [
+    ("enable_ocr", False), ("ocr_languages", "eng"), ("ocr_dpi", 400),
+])
+def test_OCR_SETTINGS_ARE_HARD_IN_BOTH_MODES(field, value) -> None:
+    """OCR changes the TEXT EXTRACTED from scanned PDFs, therefore the stored
+    vectors — exactly as chunk_size does, and chunk_size has always been hard.
+
+    corpus_manifest_sha256 does not cover it: that hashes SOURCE files, not the
+    text extracted from them. Two baselines across an ocr_dpi change used to
+    compare COMPARABLE while measuring different corpora.
+    """
+    for mode in (RETRIEVAL_MODE, FULL_MODE):
+        verdict, hard, _, _ = classify(
+            prov(eval_mode=mode), prov(eval_mode=mode, **{field: value}))
+        assert verdict == INCOMPARABLE, f"{field} must be hard in {mode} mode"
+        assert [row[0] for row in hard] == [field]
+
+
+@pytest.mark.parametrize("field", GENERATION_FIELDS)
+def test_generation_flags_are_semantic_in_FULL_mode(field) -> None:
+    """The generator is in the loop, so these move what is measured."""
+    old = prov(eval_mode=FULL_MODE)
+    new = prov(eval_mode=FULL_MODE, **{field: "CHANGED"})
+    verdict, _, semantic, _ = classify(old, new)
+    assert verdict == SEMANTIC
+    assert [row[0] for row in semantic] == [field]
+
+
+@pytest.mark.parametrize("field", GENERATION_FIELDS)
+def test_generation_flags_are_cosmetic_in_RETRIEVAL_mode(field) -> None:
+    """The LLM never runs, so they cannot have moved a single number — the same
+    conditional treatment llm_model already had."""
+    verdict, _, _, cosmetic = classify(prov(), prov(**{field: "CHANGED"}))
+    assert verdict == COSMETIC
+    assert [row[0] for row in cosmetic] == [field]
+
+
+def test_require_support_quotes_is_HARD_in_full_mode() -> None:
+    """Not merely semantic: MEASURED to collapse answering from 13/15 to 2/15.
+
+    A run with it on and a run with it off are not one system being compared,
+    they are two.
+    """
+    old = prov(eval_mode=FULL_MODE)
+    new = prov(eval_mode=FULL_MODE, require_support_quotes=True)
+    verdict, hard, _, _ = classify(old, new)
+    assert verdict == INCOMPARABLE
+    assert [row[0] for row in hard] == ["require_support_quotes"]
+
+
+def test_require_support_quotes_is_cosmetic_in_retrieval_mode() -> None:
+    verdict, _, _, cosmetic = classify(prov(), prov(require_support_quotes=True))
+    assert verdict == COSMETIC
+
+
+def test_every_recorded_field_is_classified_SOMEWHERE() -> None:
+    """The gap-finding test.
+
+    All three gaps closed so far — n_answerable, max_concurrent_queries and now
+    the OCR and generation flags — were fields RECORDED in the tuple but absent
+    from every class, so they changed silently. This makes that state
+    impossible to reach again without failing a test.
+    """
+    from core.config import Settings
+    from eval.provenance import build
+
+    tuple_ = build(Settings(_env_file=None, api_key="x"),
+                   corpus_manifest_sha256="abc", embed_model_digest="d",
+                   eval_mode=RETRIEVAL_MODE, n_answerable=1, n_unanswerable=1)
+    informational = {"recorded_at", "python"}
+    for mode in (RETRIEVAL_MODE, FULL_MODE):
+        hard, semantic, cosmetic = classify_fields(mode)
+        classified = set(hard) | set(semantic) | set(cosmetic)
+        unclassified = set(tuple_) - classified - informational
+        assert not unclassified, (
+            f"recorded but unclassified in {mode} mode: {sorted(unclassified)} — "
+            f"these would change SILENTLY")

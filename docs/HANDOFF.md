@@ -19,15 +19,15 @@ number is now.
 
 | claim | status |
 |---|---|
-| "ruff / mypy clean across 38 source files" | **RETRACTED** — measured on a host venv missing `openai`, `qdrant_client`, `fastembed`, `arq`, `redis`, `minio`. With `ignore_missing_imports`, those collapse to `Any`. Host and container disagree with **zero overlap** (5 phantom errors, 6 real ones hidden). Separately, `.gitignore` hid `backend/models/` from ruff entirely. Never a statement about the codebase. Actual: **mypy 6 errors in 3 files**. |
-| "CI green" / "what CI enforces" | **RETRACTED** — CI had **never executed**. `origin/dock_contain` sat 69 commits behind at the `pre-refactor-streamlit` tag; nothing was pushed until this audit. Both static steps are also broken by their invocation: the mypy step exits 2 (`cannot read file 'backend/core'`), the ruff step reports 35 errors. "CI green" was a Phase 1 exit criterion that was never met. |
-| "Run it in 10 minutes" (§4) | **RETRACTED** — measured **~45 minutes**, of which **~43 is image build** (2576.7 s, with a *warm* layer cache; both backend images are 10 GB). The section never mentions a build step at all. |
-| `scripts/alias_reindex.py` as a working zero-downtime reindex | **RETRACTED** — **non-functional on any existing deployment.** The alias swap cannot complete where the collection was not bootstrapped alias-first. See §11 and FINAL_AUDIT P0-3. |
-| Snapshot-based backup in `RUNBOOK-reindex.md` | **RETRACTED** — Qdrant writes snapshots to `/qdrant/snapshots`, which is **not mounted**. Snapshots did not survive `docker compose down`. `--verify` could not detect this because it restores within the same container lifetime. Use a **volume-level** backup. |
-| Startup sweep "recovers" orphaned jobs | **RETRACTED** — it **fails** them, with `"Worker restarted while this job was in flight."` The user must re-upload. |
-| **Finding #37** — the admission ceiling and its 8-request crossing | **RETRACTED, not corrected.** The *derivation* was wrong: it sized `max_concurrent_queries` against `llm_read_timeout` alone and never asked what else could bind. **Memory binds, two levels earlier.** Every number it produced is unfounded — the 4 that shipped, the 8-request crossing, and the 6–7 derived from it. Measured replacement in `core/admission_limits.py`. |
-| `/ready`'s remediation text | **RETRACTED** — it said restarting the API calls `ensure_ready`. It did not; `ensure_ready` appeared nowhere in the API startup path, and its only occurrence under `api/` was inside that string. Restarting left `/ready` at 503; an **ingest** repaired it. Now made true rather than reworded: `api/main.py` calls it. |
-| The trust/port guard as enforcing | **RETRACTED** — it read `KNOWALL_API_PORT_PUBLISHED`, which nothing set (one mention, in a compose *comment*), so it passed on a genuinely published port. A container **cannot** observe host port publishing — measured, the socket view is identical either way — so the declaration is now required and its absence fails closed. |
+| "ruff / mypy clean across 38 source files" | **NOW FIXED** (`3e86de6`) — the six real errors resolved with no ignores; mypy clean across 41 files in-container. **RETRACTED** — measured on a host venv missing `openai`, `qdrant_client`, `fastembed`, `arq`, `redis`, `minio`. With `ignore_missing_imports`, those collapse to `Any`. Host and container disagree with **zero overlap** (5 phantom errors, 6 real ones hidden). Separately, `.gitignore` hid `backend/models/` from ruff entirely. Never a statement about the codebase. Actual: **mypy 6 errors in 3 files**. |
+| "CI green" / "what CI enforces" | **NOW FIXED** (`dd0e860`, `b07450b`, `bdfaa88`) — CI first executed 2026-08-11; 4 of 5 jobs green, the fifth red on a documented blocker. **RETRACTED** — CI had **never executed**. `origin/dock_contain` sat 69 commits behind at the `pre-refactor-streamlit` tag; nothing was pushed until this audit. Both static steps are also broken by their invocation: the mypy step exits 2 (`cannot read file 'backend/core'`), the ruff step reports 35 errors. "CI green" was a Phase 1 exit criterion that was never met. |
+| "Run it in 10 minutes" (§4) | **STILL TRUE AS A RETRACTION** — §4 now states ~45 min and names the build step. **RETRACTED** — measured **~45 minutes**, of which **~43 is image build** (2576.7 s, with a *warm* layer cache; both backend images are 10 GB). The section never mentions a build step at all. |
+| `scripts/alias_reindex.py` as a working zero-downtime reindex | **PARTIALLY ADDRESSED** (`e909236`) — the unreachable branch is deleted, an explicit pre-swap refusal added, `--drop-candidate` added. The swap still cannot complete; the bootstrap is proposed, not implemented (§12 q2). **RETRACTED** — **non-functional on any existing deployment.** The alias swap cannot complete where the collection was not bootstrapped alias-first. See §11 and FINAL_AUDIT P0-3. |
+| Snapshot-based backup in `RUNBOOK-reindex.md` | **NOW FIXED** — the runbook uses a volume-level tar with a restore proof; verified by restoring 376 points into a throwaway Qdrant. **RETRACTED** — Qdrant writes snapshots to `/qdrant/snapshots`, which is **not mounted**. Snapshots did not survive `docker compose down`. `--verify` could not detect this because it restores within the same container lifetime. Use a **volume-level** backup. |
+| Startup sweep "recovers" orphaned jobs | **STILL TRUE AS A RETRACTION** — behaviour unchanged and correct; only the wording was wrong. **RETRACTED** — it **fails** them, with `"Worker restarted while this job was in flight."` The user must re-upload. |
+| **Finding #37** — the admission ceiling and its 8-request crossing | **NOW FIXED** (`1af91eb`) — replaced by a memory-derived ceiling of 1, enforced at startup against the real cgroup limit. **RETRACTED, not corrected.** The *derivation* was wrong: it sized `max_concurrent_queries` against `llm_read_timeout` alone and never asked what else could bind. **Memory binds, two levels earlier.** Every number it produced is unfounded — the 4 that shipped, the 8-request crossing, and the 6–7 derived from it. Measured replacement in `core/admission_limits.py`. |
+| `/ready`'s remediation text | **NOW FIXED** (`6638061`) — `api/main.py` calls `ensure_ready`, so the promise is true; `/ready` also reachable through the proxy. **RETRACTED** — it said restarting the API calls `ensure_ready`. It did not; `ensure_ready` appeared nowhere in the API startup path, and its only occurrence under `api/` was inside that string. Restarting left `/ready` at 503; an **ingest** repaired it. Now made true rather than reworded: `api/main.py` calls it. |
+| The trust/port guard as enforcing | **NOW FIXED** (`6638061`) — `KNOWALL_API_PORT_BINDING` is required and its absence fails closed. **RETRACTED** — it read `KNOWALL_API_PORT_PUBLISHED`, which nothing set (one mention, in a compose *comment*), so it passed on a genuinely published port. A container **cannot** observe host port publishing — measured, the socket view is identical either way — so the declaration is now required and its absence fails closed. |
 
 Two further corrections that are amendments, not retractions:
 
@@ -311,17 +311,34 @@ condition, not vigilance.
 
 # 4. Run it in about 45 minutes
 
-> **RETRACTED: "10 minutes."** Walked against a clean clone on 2026-08-10.
-> Measured **~45 min**, of which **~43 is `docker compose build`** (2576.7 s
-> with a *warm* Docker layer cache — a genuinely cold cache is slower). Both
-> backend images are 10 GB. The steps below never mentioned a build; `up -d`
-> performs it implicitly, and that is where the time goes.
->
-> Also required but undocumented: on failure, compose reports only
-> `dependency failed to start: container knowall-api is unhealthy` — the real
-> reason needs `docker compose logs api`. And because every volume and
-> container carries a global `name:`, a second checkout on the same host
-> **silently reuses the first one's volumes and models**.
+> **RETRACTED: "10 minutes."** Walked against a clean clone on 2026-08-10 and
+> re-verified after R1–R3. Numbers below are measured, not estimated.
+
+| step | measured | note |
+|---|---|---|
+| `docker compose build` | **2576.7 s (~43 min)** | with a **warm** Docker layer cache; a cold cache is slower. Both backend images are 10 GB. |
+| `docker compose up -d --wait` | 35.1 s | 7/7 services healthy |
+| `ollama pull nomic-embed-text` | 1.5 s | implausibly fast; the volume was fresh and the write real, but a fast link or CDN cache could not be ruled out. **Treat as a lower bound.** |
+| `ollama pull llama3.2:1b` | 1.3 s | same caveat |
+| first query | ~106 s | full context, cache defeated, on the production corpus |
+
+**The build step is not in the commands below and dominates the time.**
+`up -d` performs it implicitly. That omission is why "10 minutes" survived so
+long: nobody counted the part that takes 43 of the 45.
+
+**Undocumented knowledge you will otherwise need:**
+
+1. On failure, compose reports only
+   `dependency failed to start: container knowall-api is unhealthy`. The real
+   reason needs `docker compose logs api`.
+2. Every volume and container in `docker-compose.yml` carries a **global**
+   `name:`, so a second checkout on the same host **silently reuses the first
+   one's volumes and models**. A fresh clone is not a clean room.
+3. `MAX_CONCURRENT_QUERIES` must fit the api container's memory limit or startup
+   refuses — deliberately. See §12 q1: the shipped value is **1**.
+4. **Rebuild every service** before any end-to-end claim. A partial rebuild is a
+   mixture of two commits and behaves plausibly enough to be mistaken for a
+   regression.
 
 ```sh
 cp .env.example .env
@@ -522,26 +539,43 @@ explanations:
 
 ## What CI enforces
 
-> **RETRACTED.** CI had **never executed** when this was written. The branch was
-> never pushed — `origin/dock_contain` sat 69 commits behind, at the
-> `pre-refactor-streamlit` tag. Everything below describes what the workflow
-> *files say*, not any observed run.
->
-> Two steps additionally cannot pass as invoked. `ci.yml:84` runs mypy from
-> `backend/`, where `files = ["backend/core", …]` resolves to
-> `backend/backend/core` → `cannot read file`, **exit 2**, every time.
-> `ci.yml:82` passes `--config ../pyproject.toml`, which breaks `src` resolution
-> so first-party imports read as third-party → **35 errors**. Both pass under
-> auto-discovery, so the code is fine and the invocation is not.
+**First executed 2026-08-11.** Before that it had never run: 69 commits were
+unpushed, so every prior "CI green" claim was a statement about a workflow file.
+That retraction stands; what follows is what has actually happened since.
 
-`.github/workflows/eval.yml`, two jobs. On PRs touching retrieval:
-corpus-manifest integrity, embedding-model identity, golden-set schema,
-rewrite-branch agreement, and **retrieval determinism** (two passes must agree
-exactly). Nightly: full mode, reporting spread without gating on it.
+| job | executed? | now |
+|---|---|---|
+| Frontend build + types | yes | **green** |
+| Backend lint + types + unit tests | yes | **green** |
+| E2E (compose + Playwright) | yes — first ever run 2026-08-11 | **green** |
+| Image scan (report, never gates) | yes — first ever run | **green**, publishes the CVE list as an artifact |
+| Dependency gate (application layer) | yes | **red**, on one documented blocker |
 
-**Metric-regression comparison is INACTIVE.** No baseline in `eval/baselines/`
-is both provenance-complete and drawn from real documents, so the job emits a
-warning saying the gate is off rather than passing silently.
+**What the first runs caught**, none of which any local check had surfaced:
+
+- the ruff step's `--config` invocation, producing 35 phantom import-sort errors
+- the mypy step's working-directory defect — `cannot read file 'backend/core'`,
+  exit 2, so that step had never completed
+- `trivy-action@0.28.0`, a version that has never existed, failing at "Set up
+  job" two layers behind a gate that could never pass
+- **22 HIGH CVEs** in pinned Python dependencies. 9 cleared
+  (`7017bee`, `5e34c08`, `8914f8c`); 13 remain, all `pillow`, blocked by
+  `fastembed==0.7.1` requiring `pillow<12.0.0` — moving it means moving the
+  SHA-pinned reranker, which is R5 rather than a CI fix.
+
+The scan and the gate are deliberately **separate jobs**: a HIGH in a hash-pinned
+Python dependency is fixable in a commit, while a HIGH in a transitive Debian
+package needs a base-image digest bump that moves tesseract, OCR output, corpus
+content and every eval baseline. One boolean over both would either block on
+something no commit can fix, or invite softening the gate on its first execution.
+
+`.github/workflows/eval.yml` remains as before: corpus-manifest integrity,
+embedding-model identity, golden-set schema, rewrite-branch agreement and
+retrieval determinism on PRs; nightly full mode reporting spread without gating.
+
+**Metric-regression comparison is INACTIVE.** No baseline is both
+provenance-complete and drawn from real documents, so the job warns rather than
+passing silently.
 
 ---
 

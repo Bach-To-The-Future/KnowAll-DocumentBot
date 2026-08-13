@@ -1,28 +1,30 @@
 # Machine-readable companion to docs/HANDOFF.md §5.
 #
-# Every value here was read from source or measured in a running stack, not
-# inferred from documentation. `source` gives file:line where a value is
-# configured; `measured` marks numbers that came from a run rather than a
-# setting, with the script that produced them.
+# RE-DERIVED FROM CODE, NOT EDITED. Every `source:` value below was produced by
+# constructing Settings(_env_file=None) and reading the field, not by someone
+# updating a number they believed had changed. An edited sheet records a belief;
+# a derived one records the code. Regenerate with the deriver in the audit
+# scratchpad, or by reading core/config.py directly.
 #
-# Regenerate the measured values with:
+# `measured:` marks numbers that came from a run rather than a setting, with the
+# script that produced them:
 #   scripts/prompt_distribution.py   prompt + chunk token distributions
 #   scripts/verify_reindex.py        stored-chunk tokens, payload coverage
-#   scripts/stability_probe.py       memory, latency, concurrency
 #   scripts/verify_ocr.py            OCR resolution and content
+#   scripts/leak_probe.py (audit)    user-visible output defects
 
-schema_version: 2
-generated: 2026-08-07
+schema_version: 3
+generated: 2026-08-13
 generator_note: >
-  Values describe the system AS SHIPPED, which still uses llama3.2:1b.
-  The candidate generator qwen3.5:4b was measured but NOT adopted — see
-  HANDOFF.md §2.
+  Values describe the system AS SHIPPED, which still uses llama3.2:1b. The
+  candidate generator qwen3.5:4b was measured but NOT adopted — see HANDOFF §2,
+  which now carries three independent arguments rather than one.
 
 embedding:
   model: nomic-embed-text:latest
   dimensions: 768
   distance: cosine
-  source: core/config.py:50,65
+  source: core/config.py (ollama_embed_model, embed_dim)
   asymmetric_prefixes:
     document: "search_document:"
     query: "search_query:"
@@ -33,22 +35,23 @@ embedding:
     prefix of the text. Nothing downstream can detect it.
   guard: core/token_budget.py:116
   measured_max_stored_chunk_tokens: 1056
-  measured_by: scripts/verify_reindex.py
   boundary_currently_crossed: false
 
 generation:
   model: llama3.2:1b
-  source: core/config.py:70
   num_ctx: 8192
   num_predict: 1024
   temperature: 0.1
+  reasoning_enabled: false
   seed: null
   seed_note: >
-    Deliberately unset. A seed would make the eval reproducible while hiding
-    the nondeterminism real users get.
+    Deliberately unset. A seed would make the eval reproducible while hiding the
+    nondeterminism real users get.
   measured_distinct_outputs_per_10_calls: [3, 5]
-  reasoning_enabled: false
-  reasoning_flag: core/config.py:82
+  measured_latency_single_query_seconds: 106
+  latency_note: >
+    Full context, production corpus, answer cache defeated. NOT "seconds" — an
+    earlier claim to that effect is retracted.
 
 retrieval:
   strategy: hybrid dense + sparse, server-side fusion, cross-encoder rerank
@@ -67,121 +70,138 @@ retrieval:
     absolute score was low because they were tables, lists or OCR text.
   context_mode: section
   parent_char_budget: 4000
-  source: core/config.py:216-232, services/retrieval.py:188
 
 chunking:
   chunk_size_chars: 550
   chunk_overlap_chars: 100
   table_chunk_char_budget: 1600
   table_max_rows_per_chunk: 30
-  source: core/config.py:42-45
   nominal_understates_real_by: ~2x
   measured_max_stored_chunk_chars: 2991
   stacking_cause: >
     Section-title prefixes and table row-groups stack on top of the nominal
     budget, so a budget of N does not produce chunks of N.
 
-prompt:
-  measured_assembled_tokens:
-    min: 329
-    p25: 346
-    median: 5140
-    p75: 5265
-    p95: 5367
-    max: 5375
-  budget: 8192
-  median_pct_of_budget: 63
-  distribution_shape: bimodal
-  distribution_note: >
-    Two populations, not a tail. The abstention path returns one chunk or none
-    (p25=346); the answering path returns five (the 5140-5375 plateau). The
-    upper mode spans 4%, so prompt size is nearly CONSTANT on the answering
-    path — latency is predictable and not reducible by trimming outliers.
-  measured_by: scripts/prompt_distribution.py
-  budget_guard: core/token_budget.py:139
-  over_budget_count: 0
+ocr:
+  enabled: true
+  languages: eng+fra
+  dpi: 200
+  engine: tesseract (apt, pinned by base-image digest)
+  tessdata_source: tesseract-ocr/tessdata
+  tessdata_tag: "4.1.0"
+  tessdata_prefix: /opt/tessdata
+  checksums: backend/vendor/tessdata/MANIFEST.yaml
+  build_gate: api/verify_tessdata.py
+  system_copy_installed: false
+  provenance_note: >
+    enable_ocr / ocr_languages / ocr_dpi are HARD fields in the eval provenance
+    tuple as of R4. They change the TEXT EXTRACTED from scanned PDFs, therefore
+    the stored vectors — exactly as chunk_size does. corpus_manifest_sha256 does
+    not cover this: it hashes SOURCE files, not extracted text.
+
+output_handling:
+  module: services/output_guard.py
+  why: >
+    Nothing inspected what the model EMITTED before it reached the user. Three
+    user-visible defects traced to that absence.
+  checks:
+    strip_scaffolding: true
+    strip_appended_decline: true
+    strip_fabricated_headers: true
+    strip_leading_citation_run: true
+  min_answer_chars: 20
+  measured_before:
+    fence_leak: {fr: 2/9, en: 3/9}
+    trailing_abstention: {fr: 0/9, en: 1/9}
+    fabricated_header: {fr: 1/9, en: 1/9}
+  measured_after:
+    fence_leak: {fr: 0/9, en: 0/9}
+    trailing_abstention: {fr: 0/9, en: 0/9}
+    fabricated_header: {fr: 1/9, en: 0/9}
+  after_note: >
+    The surviving header names a document that WAS retrieved, so retaining it is
+    the design working — only never-retrieved sources are stripped. Corroborated
+    mechanically: the stage ran on 16 generations and made 7 corrections.
+  defence_in_depth: >
+    The GENERATOR IS UNCHANGED. It still emits scaffolding and still appends
+    declines; the stage stops that reaching users. This is not a repair.
 
 vector_store:
   engine: qdrant
   vectors: named dense + sparse
   quantization: int8
   point_id_recipe: uuid5(source:etag:chunk_seq)
-  point_id_note: stable and idempotent; changing it orphans every existing point
   cutover: upsert new etag, then delete stale
   required_payload_indexes: [source, chunk_seq, section_title, etag]
   index_invariant: >
     Every field used in a FieldCondition must appear here, or the query
     full-scans and degrades silently. Enforced by a static test.
-  source: integrations/qdrant_store.py
 
 corpus:
-  production_collection_points: 376
-  production_distinct_sources: 13
+  production_collection_points: 377
   eval_corpus: eval/corpus/ (tier B, synthetic, 13 documents)
   tier_a: ABSENT
   tier_c: PLANNED, NEVER BUILT
   section_title_coverage:
-    points_with: 162
-    points_total: 376
     pct: 43
     gap: >
-      214 points are PDF and carry none — per-page sections would be
-      singletons. Any filter on section_title silently excludes the majority.
-
-ocr:
-  engine: tesseract (apt, pinned by base-image digest)
-  language_data: vendored
-  tessdata_source: tesseract-ocr/tessdata
-  tessdata_tag: "4.1.0"
-  tessdata_prefix: /opt/tessdata
-  languages: [eng, fra]
-  checksums: backend/vendor/tessdata/MANIFEST.yaml
-  build_gate: api/verify_tessdata.py
-  system_copy_installed: false
-  system_copy_note: >
-    The per-language apt packages are deliberately NOT installed, so there is
-    no system copy for TESSDATA_PREFIX to be shadowed by.
+      214 points are PDF and carry none. Any filter on section_title silently
+      excludes the majority.
 
 operational:
-  max_concurrent_queries: 4
-  max_concurrent_queries_note: >
-    A qwen3.5:4b number, NOT a system number. llama3.2:1b answers in seconds
-    and its crossing is far higher. This value and the generator move together.
+  max_concurrent_queries: 1
+  max_concurrent_queries_basis: >
+    MEASURED against memory, which is what binds. Finding #37 is RETRACTED: it
+    sized this against llm_read_timeout alone and never asked what else could
+    run out first. api container at 5 GiB — fixed resident 1.62, concurrency 1
+    settles at 3.87 (77%), concurrency 2 at 4.88 (98%), concurrency 3 projected
+    5.88 (does not fit). Enforced at startup by core/admission_limits.py.
+  single_user_consequence: >
+    This makes the incumbent effectively single-user. A product decision, not a
+    config value — see HANDOFF §12 question 1.
   llm_read_timeout_seconds: 300
-  measured_latency_crossing_concurrency: 8
-  ollama_memory_limit: 8g
-  ollama_memory_limit_basis: >
-    6g was 98% consumed (5.90 of 6.0 GiB) at cold model load while serving
-    concurrent requests — which every deploy and every recovery does.
-  measured_cold_start_seconds: 23.5
+  api_memory_limit: 5g
+  ollama_memory_limit: 4g
+  worker_memory_limit: 2g
+  declared_total_gib: 11.5
+  host_available_gib: 11.68
+  memory_note: >
+    Previously 15.5 GiB declared against 11.68 available — oversubscribed by
+    33%, and it worked only because nothing approached its limit. Asserted at
+    startup.
   api_port_binding: 127.0.0.1
+  api_port_binding_declaration: KNOWALL_API_PORT_BINDING=loopback
+  binding_note: >
+    A container CANNOT observe host port publishing — measured, the socket view
+    is identical for 127.0.0.1 and 0.0.0.0 mappings. The declaration is required
+    and its ABSENCE FAILS CLOSED.
   trust_proxy_identity: true
 
 caching:
   answer_cache: keyed on normalized question + knobs + corpus version
   prefix_cache: >
     The inference server caches KV prefill separately. Disabling the answer
-    cache does NOT disable it. Two layers with different hit conditions,
-    neither instrumented for the other.
+    cache does NOT disable it. Two layers, different hit conditions, neither
+    instrumented for the other.
   benchmark_warning: >
-    Never benchmark with a fixed prompt — any latency number taken that way is
-    a cache-hit number.
+    Never benchmark with a fixed prompt — any latency number taken that way is a
+    cache-hit number. This bit the R2 streaming test: 1 token in 81 ms read as a
+    pass and was a cache hit.
 
 evaluation:
   modes: [retrieval, full]
-  retrieval_deterministic: true
-  retrieval_measured_spread: 0.0
-  retrieval_passes_confirmed: 6
-  full_mode_measured_spread: 0.0
-  full_mode_spread_is_evidence_of_stability: false
-  full_mode_qualifications:
-    - the pipeline genuinely did not vary
-    - the metric was too coarse to register it
-    - part of the work was served from the prefix cache
   metrics: [recall_at_fetch, hit_at_k, mrr_at_k, false_abstention_rate, correct_abstention_rate]
   primary_quality_metric: mrr_at_k
   primary_quality_metric_note: >
     NOT hit_at_k — returning five chunks instead of one raises it mechanically.
+  provenance_hard_fields_added_after_defects:
+    - n_answerable / n_unanswerable
+    - max_concurrent_queries (cosmetic)
+    - enable_ocr / ocr_languages / ocr_dpi
+    - generation and strip_* flags (conditional on eval_mode)
+  provenance_note: >
+    The comparator only catches drift in fields someone thought to include. Every
+    gap so far was found by a defect, not by review.
   ci_regression_gate: INACTIVE
   ci_regression_gate_reason: >
     No baseline is both provenance-complete and drawn from real documents. The
@@ -189,7 +209,6 @@ evaluation:
 
 grounding:
   enabled: false
-  flag: core/config.py:135
   mechanism: quote-backed, verified by string match, no model judgement
   implementation: services/grounding.py
   why_disabled: >
@@ -199,3 +218,28 @@ grounding:
   known_gap: >
     Does NOT catch a claim that quotes truthfully and reasons wrongly from the
     quote. Pinned as a test so it cannot be quietly forgotten.
+  structural_decline_signal: >
+    grounding.attributes_nothing() is now module-level and flag-free, so
+    abstention detection no longer requires this disabled mechanism to be on.
+
+ci:
+  first_executed: 2026-08-11
+  first_executed_note: >
+    CI had NEVER run before that date. 69 commits were unpushed; every "CI
+    green" claim predating it was a statement about a workflow file.
+  jobs_executed_at_least_once:
+    frontend: true
+    backend: true
+    e2e_compose_playwright: true
+    image_scan_report: true
+    dependency_gate: true
+  currently_green: [frontend, backend, e2e, image-scan]
+  currently_red: [dependency-gate]
+  dependency_gate_blocker: >
+    13 HIGH in pillow, blocked by fastembed==0.7.1 requiring pillow<12.0.0.
+    Bumping means moving the SHA-pinned reranker — R5, not a CI fix.
+  what_it_caught_on_first_runs:
+    - the ruff step's --config invocation (35 phantom errors)
+    - the mypy step's working-directory defect (exit 2, never completed)
+    - trivy-action@0.28.0, a version that has never existed
+    - 22 HIGH CVEs in pinned Python dependencies, 9 now cleared
