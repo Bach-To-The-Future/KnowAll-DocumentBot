@@ -1,0 +1,34 @@
+# Line-ending policy.
+#
+# WHY THIS FILE EXISTS
+#
+# eval/corpus/verify.py hashes every corpus document BYTE FOR BYTE and refuses
+# to run an evaluation against a corpus whose hashes do not match MANIFEST.yaml.
+# That gate is correct and load-bearing: an eval run against a drifted corpus
+# produces numbers that cannot be compared to any baseline.
+#
+# Without this file, git applies its platform default. On Windows
+# (core.autocrlf=true) every text file gains CRLF on checkout, so the corpus
+# documents a fresh clone produces are NOT the bytes the manifest describes:
+#
+#     manifest : a54bedf70f18d6689e70826e2b898581ff44d54597e56bcb93acfabf01b469a5
+#     on disk  : 9b3fff1c2b1db43b04cdbb2fd08f7f272d2aaf83c28bc76703f3a9b533f4ccea
+#     with CR removed -> a54bedf7...  (the manifest value, exactly)
+#
+# Measured during end-to-end verification: SEVEN of thirteen tier-B documents
+# mismatched on a clean Windows clone, so `eval/corpus/verify.py` failed and the
+# evaluation harness could not run AT ALL. It was invisible for the whole
+# engagement because every prior eval ran in a working tree that already had the
+# files, never in a fresh clone.
+#
+# `-text` disables all conversion, so these files are checked out exactly as
+# stored — which is what a byte-for-byte hash requires.
+backend/eval/corpus/** -text
+
+# The vendored OCR models are binary and checksummed by api/verify_tessdata.py
+# for the same reason. Conversion would corrupt them outright.
+backend/vendor/tessdata/** -binary
+
+# Shell scripts and anything executed by a Linux container must keep LF; CRLF
+# in a shebang line produces "bad interpreter: no such file or directory".
+*.sh text eol=lf
