@@ -493,8 +493,11 @@ def main() -> int:
     embed_digest = verify_embedding_model(settings, context="eval")
     # Full mode puts the generator in the retrieval loop, so its identity
     # matters as much as the embedder's. Retrieval mode never calls it.
+    llm_digest: str | None = None
     if args.mode == FULL_MODE:
-        verify_generation_model(settings, context="eval")
+        # The return value was discarded here, so a full-mode baseline pinned
+        # its generator by a MOVING TAG and nothing else. Captured now.
+        llm_digest = verify_generation_model(settings, context="eval")
     if args.mode == FULL_MODE:
         gate_full_mode(settings)
 
@@ -564,6 +567,7 @@ def main() -> int:
             # to mean anything.
             n_answerable=sum(1 for r in rows if r["kind"] == "answerable"),
             n_unanswerable=sum(1 for r in rows if r["kind"] == "abstention"),
+            llm_model_digest=llm_digest,
         ),
         "results": summary["results"],
         "slices": summary["slices"],

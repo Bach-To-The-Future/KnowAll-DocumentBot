@@ -43,6 +43,7 @@ def prov(**overrides: object) -> dict:
         "query_expansion_count": 3,
         "enable_answer_cache": True,
         "llm_model": "llama3.2:1b",
+        "llm_model_digest": "not-applicable",
         "max_concurrent_queries": 4,
         "reranker_revision": "2cfc18c",
         "bm25_revision": "e499a1f",
@@ -396,6 +397,55 @@ def test_require_support_quotes_is_HARD_in_full_mode() -> None:
 def test_require_support_quotes_is_cosmetic_in_retrieval_mode() -> None:
     verdict, _, _, cosmetic = classify(prov(), prov(require_support_quotes=True))
     assert verdict == COSMETIC
+
+
+def test_llm_model_DIGEST_is_hard_in_full_mode() -> None:
+    """`llama3.2:1b` is a moving tag, so the tag pins nothing.
+
+    Recording only the tag let a full-mode baseline claim to describe a
+    generator that upstream could republish underneath it — and every measured
+    claim about abstention and grounding is a statement about one specific
+    generator. Same reasoning that made `embed_model_digest` hard; it was simply
+    never applied to the model on the other end.
+    """
+    old = prov(eval_mode=FULL_MODE, llm_model_digest="baf6a787")
+    new = prov(eval_mode=FULL_MODE, llm_model_digest="0000ffff")
+    verdict, hard, _, _ = classify(old, new)
+    assert verdict == INCOMPARABLE
+    assert [row[0] for row in hard] == ["llm_model_digest"]
+
+
+def test_llm_model_digest_is_cosmetic_in_retrieval_mode() -> None:
+    """Retrieval mode never calls the generator, so its identity cannot have
+    moved a single number."""
+    verdict, _, _, _ = classify(prov(), prov(llm_model_digest="anything-else"))
+    assert verdict == COSMETIC
+
+
+def test_retrieval_mode_records_NOT_APPLICABLE_rather_than_unpinned() -> None:
+    """The two mean different things and must not collapse.
+
+    "unpinned" = the generator ran and its identity was not captured, which
+    makes a file a diagnostic rather than a reference. "not-applicable" = the
+    generator never ran. Collapsing them would either downgrade every retrieval
+    baseline to diagnostic, or hide a genuinely unpinned full-mode run.
+    """
+    from core.config import Settings
+    from eval.provenance import build
+
+    settings = Settings(_env_file=None, api_key="x")
+    common = dict(corpus_manifest_sha256="abc", embed_model_digest="d",
+                  n_answerable=1, n_unanswerable=1)
+
+    retrieval = build(settings, eval_mode=RETRIEVAL_MODE, **common)
+    assert retrieval["llm_model_digest"] == "not-applicable"
+
+    full_unpinned = build(settings, eval_mode=FULL_MODE, **common)
+    assert full_unpinned["llm_model_digest"] == "unpinned"
+
+    full_pinned = build(settings, eval_mode=FULL_MODE,
+                        llm_model_digest="baf6a787", **common)
+    assert full_pinned["llm_model_digest"] == "baf6a787"
 
 
 def test_every_recorded_field_is_classified_SOMEWHERE() -> None:

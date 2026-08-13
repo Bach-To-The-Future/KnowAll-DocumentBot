@@ -141,7 +141,16 @@ _GENERATION_FLAGS = (
 # HARD rather than semantic, and only in full mode: MEASURED to collapse
 # answering from 13/15 to 2/15 on the shipped generator. A run with it on and a
 # run with it off are not the same system being compared, they are two systems.
-_FULL_MODE_HARD = ("require_support_quotes",)
+#
+# `llm_model_digest` joins it for the reason `embed_model_digest` is hard:
+# `llama3.2:1b` is a MOVING TAG. Recording the tag alone pins nothing — a
+# republish upstream changes the generator under a baseline that still claims to
+# describe it, and every measured claim about abstention and grounding then
+# describes a model that is no longer running. This was found by asking what a
+# full-mode reference baseline actually pins, and the answer was: not the
+# generator. The comparator only catches drift in fields someone thought to
+# include, so the tuple's gaps are silent by construction.
+_FULL_MODE_HARD = ("require_support_quotes", "llm_model_digest")
 
 _SEMANTIC_BASE = (
     "reranker_model",
@@ -227,6 +236,7 @@ def build(
     eval_mode: str,
     n_answerable: int,
     n_unanswerable: int,
+    llm_model_digest: str | None = None,
 ) -> dict[str, Any]:
     """Assemble the tuple. Model revisions come from env baked into the image
     at build time (see api/Dockerfile), so they describe the container actually
@@ -235,13 +245,23 @@ def build(
     `n_answerable` / `n_unanswerable` are REQUIRED rather than defaulted: a
     baseline recorded without them would compare as though the population had
     never changed, which is the exact defect they exist to catch.
+
+    `llm_model_digest` defaults to None because in retrieval mode the generator
+    never runs, and there is nothing honest to record. It is recorded as
+    "not-applicable" in that mode — distinct from "unpinned", which means the
+    generator DID run and its identity was not captured.
     """
+    llm_digest = (
+        (llm_model_digest or "unpinned") if eval_mode == FULL_MODE
+        else "not-applicable"
+    )
     return {
         "corpus_manifest_sha256": corpus_manifest_sha256,
         "n_answerable": n_answerable,
         "n_unanswerable": n_unanswerable,
         "embed_model": settings.embed_model,
         "embed_model_digest": embed_model_digest or "unpinned",
+        "llm_model_digest": llm_digest,
         "chunk_size": settings.chunk_size,
         "chunk_overlap": settings.chunk_overlap,
         "table_chunk_char_budget": settings.table_chunk_char_budget,

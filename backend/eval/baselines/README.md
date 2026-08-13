@@ -22,19 +22,37 @@ docker compose exec \
   -e QDRANT_COLLECTION=knowall_eval \
   -e KNOWALL_GIT_SHA=$(git rev-parse HEAD) \
   -e KNOWALL_API_IMAGE_ID=$(docker inspect -f '{{.Id}}' knowall-documentbot-api) \
+  -e KNOWALL_WEB_IMAGE_ID=$(docker inspect -f '{{.Id}}' knowall-documentbot-web) \
   -e EXPECTED_EMBED_MODEL_DIGEST=<live digest> \
   api python eval/run_eval.py --mode retrieval --runs 3 --out /tmp/b.json
 ```
 
-Full mode additionally requires `-e ENABLE_ANSWER_CACHE=false`; the harness
-refuses to start without it.
+`KNOWALL_WEB_IMAGE_ID` was missing from this list, and its absence is what made
+the first attempt at a fresh reference baseline self-label DIAGNOSTIC ONLY. The
+web tier plays no part in an eval run; it is in the tuple so that "which build
+produced this number" has one answer rather than two.
+
+Write to `/tmp` and `docker compose cp` the file out. `eval/baselines/` inside
+the image is root-owned and the API runs as `appuser`, so `--out` pointed there
+dies on a `PermissionError` — after the run has completed, which wastes the run.
+
+Full mode additionally requires:
+
+- `-e ENABLE_ANSWER_CACHE=false` — the harness refuses to start without it,
+  because runs 2 and 3 would otherwise measure the cache.
+- `-e EXPECTED_LLM_MODEL_DIGEST=<live digest>` — not refused without it, but the
+  run warns and `llm_model_digest` records `"unpinned"`, which makes the file a
+  diagnostic. `llama3.2:1b` is a moving tag; the tag alone pins nothing.
 
 ## What makes a file a *reference* baseline
 
 Every field of the provenance tuple resolved. In particular:
 
-- `git_sha`, `api_image_digest` — not `"unknown"`
+- `git_sha`, `api_image_digest`, `web_image_digest` — not `"unknown"`
 - `reranker_revision`, `bm25_revision` — not `"unpinned"`
+- `llm_model_digest` — the live generator digest in full mode; `"not-applicable"`
+  in retrieval mode, where the generator never runs. `"unpinned"` there means
+  the generator *did* run unidentified, which is a diagnostic, not a reference
 - `corpus_manifest_sha256` — matches `eval/corpus/MANIFEST.yaml`
 - `embed_model_digest` — the live Ollama digest, verified at run head
 - the code in the image matches `git_sha` (rebuild, don't `docker compose cp`)
