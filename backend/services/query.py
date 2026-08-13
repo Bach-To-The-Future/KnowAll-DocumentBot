@@ -586,8 +586,23 @@ class QueryService:
                 # the guard cannot un-send them. It emits a correction event so
                 # the client replaces an empty bubble with the abstention, and
                 # keeps the malformed text out of the cache and out of memory.
-                checked = self._check_grounding(
-                    self._reject_if_malformed(answer, prepared), prepared)
+                # R2 step 6. The output stage joins the SAME chain and the SAME
+                # `replace` event D5 established, rather than a second
+                # mechanism — one correction path is easier to reason about
+                # than two, and the client already handles this one.
+                #
+                # ALL FOUR CHECKS RUN AT COMPLETION, including the two the
+                # module documents as streamable in principle. Mid-stream
+                # withholding would buy the user a briefer glimpse of
+                # scaffolding, at the cost of buffering partial markers across
+                # token boundaries — and a buffering bug truncates answers in a
+                # path where nothing can be un-sent. The asymmetry is the whole
+                # reason streaming was left until last; it does not become a
+                # better trade just because the checks now pass.
+                checked = self._guard_output(
+                    self._check_grounding(
+                        self._reject_if_malformed(answer, prepared), prepared),
+                    prepared)
                 if checked != answer:
                     answer_parts[:] = [checked]
                     answer = checked

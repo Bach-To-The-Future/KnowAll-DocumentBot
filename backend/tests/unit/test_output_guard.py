@@ -98,7 +98,10 @@ def test_a_clean_generation_reports_nothing_fired() -> None:
     brittleness pattern this engagement filed as P2-9.
     """
     outcome = apply("[1] A clean answer.", settings())
-    assert len(outcome.counters) == len(ALL_CHECK_FLAGS)
+    # At least one check per flag; some flags gate more than one check
+    # (strip_fabricated_headers gates both the stripper and the page-mismatch
+    # REPORTER, which are different questions about the same header).
+    assert len(outcome.counters) >= len(ALL_CHECK_FLAGS)
     assert all(v == 0 for v in outcome.counters.values())
     assert outcome.fired == []
 
@@ -125,12 +128,14 @@ def test_each_check_is_reversible_INDEPENDENTLY() -> None:
     that misbehaves without losing the rest.
     """
     text = "Answer. <<<PASSAGE 1>>>  trailing   spaces."
+    baseline = len(apply(text, settings(), decline_message=DECLINE,
+                         citations=[]).counters)
     for flag in ALL_CHECK_FLAGS:
         outcome = apply(text, settings(**{flag: False}),
                         decline_message=DECLINE, citations=[])
-        assert len(outcome.counters) == len(ALL_CHECK_FLAGS) - 1, (
-            f"disabling {flag} must remove exactly one check")
-    # and the scaffolding check still works while another is disabled
+        assert len(outcome.counters) < baseline, (
+            f"disabling {flag} must remove at least one check")
+    # and a check still works while a DIFFERENT one is disabled
     outcome = apply(text, settings(strip_appended_decline=False),
                     decline_message=DECLINE, citations=[])
     assert "<<<" not in outcome.text
@@ -395,3 +400,66 @@ def test_the_new_checks_are_reversible() -> None:
                     citations=RETRIEVED)
     assert "invented.pdf" in outcome.text
     assert outcome.text.startswith("[1] [2][3]")
+
+
+# --- R2 step 6: streaming ----------------------------------------------------
+
+def test_the_streaming_path_runs_the_stage_through_the_EXISTING_replace_event() -> None:
+    """Wiring, asserted at source level for the same reason as the
+    non-streaming one: what broke before was a single missing call.
+
+    The stage must join D5's existing correction chain rather than introduce a
+    second mechanism — one correction path is easier to reason about than two,
+    and the client already handles `replace`.
+    """
+    import inspect
+
+    from services.query import QueryService
+    source = inspect.getsource(QueryService.stream_prepared)
+    assert "_guard_output" in source, "stream_prepared must run the output stage"
+    assert '"type": "replace"' in source, "corrections must use the existing event"
+    # And it must not have grown a parallel correction event.
+    assert source.count('"type": "replace"') == 1
+
+
+def test_streaming_and_non_streaming_apply_the_SAME_checks() -> None:
+    """A correction that only one path performs is a defect that only some
+    users see — which is how the original three shipped."""
+    import inspect
+
+    from services.query import QueryService
+    streaming = inspect.getsource(QueryService.stream_prepared)
+    blocking = inspect.getsource(QueryService.answer_prepared)
+    for call in ("_reject_if_malformed", "_check_grounding", "_guard_output"):
+        assert call in streaming, f"{call} missing from the streaming path"
+        assert call in blocking, f"{call} missing from the blocking path"
+
+
+def test_a_page_mismatch_on_a_real_document_is_COUNTED() -> None:
+    """The gap between what was documented and what was implemented.
+
+    The header check was documented as counting this case and did not: it
+    collected only never-retrieved sources, so a real document with an invented
+    page was silently ignored. Documented behaviour the code does not perform is
+    the defect this stage exists to fix, one level up.
+    """
+    text = "[1] Dix ans. (Source: cr-francais.pdf, Page: 99)"
+    unchanged, count = output_guard.count_header_page_mismatches(text, RETRIEVED)
+    assert count == 1
+    assert unchanged == text, "this check reports; it must never rewrite"
+
+
+def test_a_matching_page_is_not_counted() -> None:
+    text = "[1] Dix ans. (Source: cr-francais.pdf, Page: 1)"
+    _, count = output_guard.count_header_page_mismatches(text, RETRIEVED)
+    assert count == 0
+
+
+def test_a_fabricated_source_is_not_double_counted_as_a_page_mismatch() -> None:
+    """The two counters must measure different things, or the second hides
+    inside the first."""
+    text = "[1] x. (Source: never-retrieved.pdf, Page: 4)"
+    _, mismatches = output_guard.count_header_page_mismatches(text, RETRIEVED)
+    _, fabricated = output_guard.check_fabricated_headers(text, RETRIEVED)
+    assert mismatches == 0
+    assert fabricated == 1

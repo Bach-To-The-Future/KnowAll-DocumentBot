@@ -285,6 +285,44 @@ def check_fabricated_headers(text: str, citations: list[dict]) -> tuple[str, int
     return _collapse(cleaned), len(fabricated)
 
 
+def count_header_page_mismatches(text: str, citations: list[dict]) -> tuple[str, int]:
+    """Report headers naming a RETRIEVED document with a page that disagrees.
+
+    REPORTS ONLY — the text is returned unchanged, always.
+
+    This exists because the docstring above promised the ambiguous case would be
+    "counted, not stripped", and the first implementation did neither: it
+    collected only never-retrieved sources, so a real document with an invented
+    page number was silently ignored. Documented behaviour that the code does not
+    perform is the same defect this stage was built to fix, one level up.
+
+    Kept as a separate check rather than folded into the header check, because
+    "how many headers were fabricated" and "how many cited a real document with
+    the wrong page" are different quantities and a single counter would hide the
+    second inside the first.
+    """
+    if not text or not citations:
+        return text, 0
+
+    pages: dict[str, set[str]] = {}
+    for citation in citations:
+        source = str(citation.get("source", "")).strip().casefold()
+        if not source:
+            continue
+        page = citation.get("page_number")
+        pages.setdefault(source, set()).add("" if page is None else str(page).strip())
+
+    mismatches = 0
+    for match in _HEADER.finditer(text):
+        source = (match.group(1) or "").strip().casefold()
+        if source not in pages:
+            continue  # fabricated; the other check owns it
+        stated = (match.group(2) or "").strip()
+        if stated and stated not in pages[source]:
+            mismatches += 1
+    return text, mismatches
+
+
 def _enabled_checks(settings: Settings,
                     decline_message: str = "",
                     citations: list[dict] | None = None) -> list[tuple[str, Check]]:
@@ -303,6 +341,11 @@ def _enabled_checks(settings: Settings,
                        lambda t: check_fabricated_headers(t, citations or [])))
     if settings.strip_leading_citation_run:
         checks.append(("leading_citations", strip_leading_citation_run))
+    if settings.strip_fabricated_headers:
+        # Report-only, and gated by the same flag: it is the other half of the
+        # same question about provenance headers.
+        checks.append(("header_page_mismatch",
+                       lambda t: count_header_page_mismatches(t, citations or [])))
     return checks
 
 
