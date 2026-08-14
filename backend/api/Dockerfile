@@ -59,10 +59,29 @@ ENV FASTEMBED_CACHE_PATH=/opt/models \
 ARG BM25_REVISION=e499a1f8d6bec960aab5533a0941bf914e70faf9
 ARG RERANKER_REVISION=2cfc18c9415c912f9d8155881c133215df768a70
 COPY api/verify_model_pins.py /tmp/verify_model_pins.py
+# The `rm -rf /opt/models/hub` is not incidental — it is 3.1 GB of a 10.1 GB
+# image, and it MUST stay inside this RUN, after verification.
+#
+# Two caches are populated here, and they do not share storage:
+#   HF_HOME=/opt/models              -> /opt/models/hub/...        (step 1)
+#   FASTEMBED_CACHE_PATH=/opt/models -> /opt/models/models--...    (step 2)
+# snapshot_download fetches EVERY file in the repo, so the hub tree receives
+# model.onnx AND model.safetensors AND pytorch_model.bin — three copies of the
+# same 1,061 MB weight — and fastembed then writes a fourth (its own model.onnx).
+# Only fastembed's copy is ever loaded.
+#
+# Order matters. verify_model_pins.py reads the FASTEMBED tree, so it must run
+# while both are intact and the deletion must follow it. And the rm must be in
+# THIS layer: a separate RUN leaves 3.1 GB in the layer below and saves nothing.
+#
+# Measured behaviour-preserving before shipping: rerank scores are bit-identical
+# with and without the hub tree (3.2633895874023438 / -10.194496154785156), so
+# this is pruning, not an R5 retrieval change. See docs/PRUNING_PROPOSAL.md R-1.
 RUN python -c "from huggingface_hub import snapshot_download; snapshot_download('Qdrant/bm25', revision='${BM25_REVISION}'); snapshot_download('BAAI/bge-reranker-base', revision='${RERANKER_REVISION}')" \
     && python -c "from fastembed import SparseTextEmbedding; from fastembed.rerank.cross_encoder import TextCrossEncoder; SparseTextEmbedding('Qdrant/bm25'); TextCrossEncoder('BAAI/bge-reranker-base')" \
     && python /tmp/verify_model_pins.py "${BM25_REVISION}" "${RERANKER_REVISION}" \
     && rm /tmp/verify_model_pins.py \
+    && rm -rf /opt/models/hub \
     && chown -R 10001 /opt/models && chmod -R a+rX /opt/models
 
 # Recorded in the image so a running container can report exactly which model
