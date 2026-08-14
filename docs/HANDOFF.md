@@ -342,9 +342,11 @@ long: nobody counted the part that takes 43 of the 45.
 1. On failure, compose reports only
    `dependency failed to start: container knowall-api is unhealthy`. The real
    reason needs `docker compose logs api`.
-2. Every volume and container in `docker-compose.yml` carries a **global**
-   `name:`, so a second checkout on the same host **silently reuses the first
-   one's volumes and models**. A fresh clone is not a clean room.
+2. **A fresh clone is not a clean room** — every volume in
+   `docker-compose.yml` carries a global `name:`, so a second checkout on the
+   same host silently reuses the first one's volumes and models. Full entry,
+   including why a routine `docker volume prune` destroys the production
+   collection: **§11, P1**.
 3. `MAX_CONCURRENT_QUERIES` must fit the api container's memory limit or startup
    refuses — deliberately. See §12 q1: the shipped value is **1**.
 4. **Rebuild every service** before any end-to-end claim. A partial rebuild is a
@@ -756,9 +758,10 @@ volumes:
 Compose normally namespaces volumes per project. `name:` overrides that. Two
 consequences, and the second is the dangerous one:
 
-**1. Clean rooms were never isolated.** A checkout in a different directory is a
-different compose project, but it binds the *same four volumes*: `qdrant_data`,
-`minio_data`, `ollama_data`, `redis_data`. Any `up` in a second working tree
+**1. A fresh clone is not a clean room.** A checkout in a different directory is
+a different compose project, but it binds the *same four volumes*:
+`qdrant_data`, `minio_data`, `ollama_data`, `redis_data`. It silently reuses the
+first checkout's volumes **and models**. Any `up` in a second working tree
 mounts the live production data, and any `down -v` there destroys it. This is
 the retroactive explanation for why the audit's clean rooms had to have their
 volumes backed up and restored by hand — that was not caution, it was the only
