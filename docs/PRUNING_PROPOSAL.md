@@ -300,7 +300,7 @@ Corrections, not deletions. Each is a claim a later commit made false:
 | `FINAL_VERIFICATION.md:313` | *"387 passed / 1 skipped"* | 392 passed / 1 skipped |
 | `RAG_FIELD_GUIDE.md:43` | *"tier B — 13 documents, 18 chunks · 15 of 22"* | 12 indexed documents, 17 chunks, 13 answerable |
 | `rag_fact_sheet.yaml:142` | *"eval_corpus: … 13 documents"* | 13 in the corpus **definition**, 12 in the **index** — the distinction now matters |
-| `MANIFEST.yaml:38` | *"tier A is NOT YET POPULATED"* | still true, but points at `REMEDIATION_LOG.md, PROPOSAL P-1`; tier A is now open question 5 in `HANDOFF.md` |
+| ~~`MANIFEST.yaml:38`~~ | *"tier A is NOT YET POPULATED"* | **WITHDRAWN — do not fix.** The pointer is stale, but `manifest_sha256` hashes the **whole file, comments included**. Editing the comment moved it `ccb0fba9…` → `f30fb62e…`, which is a HARD provenance field *and* the etag for every point ID: it would invalidate both reference baselines and force a full re-ingest. Attempted, measured, reverted. The cost of the fix exceeds the cost of the staleness by orders of magnitude (D6). |
 | `HANDOFF.md:581` / `FINAL_VERIFICATION.md:264` | *"referenceless"* | both already read as past tense in context — **verified correct, no change needed** |
 
 The field-guide headline (row 3) is the one that matters: it is the number a

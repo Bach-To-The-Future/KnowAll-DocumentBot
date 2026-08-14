@@ -43,6 +43,19 @@ each is misleading on its own**:
 | tier B — synthetic, 13 documents, 18 chunks | **15 of 22** | 1.000 |
 | production — 13 real documents, 377 points | **3 of 21** | — |
 
+> **The tier-B row describes a corpus that is no longer indexed.** It was
+> measured against 13 documents / 18 chunks, before `b04-wide-row.csv` was
+> excluded from ingestion — it produces a single chunk wider than the embedding
+> window, so the token-budget guard refuses it (`HANDOFF.md` §10). The index is
+> now **12 documents / 17 chunks**, and the answerable denominator is 13 in
+> retrieval mode and 19 in full mode, not 22.
+>
+> The numbers are left as measured rather than restated, because **they have not
+> been re-measured** and a floor sweep against the current corpus has not been
+> run. Changing a number to match a new population without re-running the
+> measurement is the exact error this guide's Rule on denominators exists to
+> prevent. What transfers is the mechanism below, not the ratio.
+
 **The synthetic figure overstates the defect.** With 18 chunks and `fetch_k=20`,
 retrieval was fetching the entire corpus, so `recall_at_fetch = 1.000` is
 arithmetic rather than a retrieval result — exactly what Part III warns you to

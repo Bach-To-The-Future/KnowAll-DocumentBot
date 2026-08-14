@@ -139,7 +139,10 @@ vector_store:
 
 corpus:
   production_collection_points: 377
-  eval_corpus: eval/corpus/ (tier B, synthetic, 13 documents)
+  # 13 documents in the corpus DEFINITION; 12 reach the index.
+  # b04-wide-row.csv carries `ingest: false` -- one row wider than the
+  # embedding window, refused by the token-budget guard, kept as a fixture.
+  eval_corpus: eval/corpus/ (tier B, synthetic, 13 documents / 12 indexed)
   tier_a: ABSENT
   tier_c: PLANNED, NEVER BUILT
   section_title_coverage:

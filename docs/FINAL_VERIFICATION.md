@@ -302,7 +302,9 @@ clone builds, serves, and answers, verified by doing it.
 But F2 and F3 add a narrower version of the same shape: **the repository still
 does not contain a working evaluation path.** A clean clone could not run the
 eval at all (F2, fixed), and still cannot build the eval corpus from scratch
-(F3, open). The system is reproducible; its instrument is not yet.
+(F3, since fixed in `35ec4a2`). **Both halves are now closed:** a clean clone
+builds, serves and answers, and the eval corpus ingests from scratch. The
+system is reproducible and so is its instrument.
 
 Everything the audit confirmed — failure and recovery, guard behaviour, the user
 journey — survived twelve changes intact, including a starlette major. Retrieval
@@ -312,3 +314,7 @@ a corpus ingest nobody had attempted.
 
 **Gates at close:** ruff clean, mypy clean, **387 passed / 1 skipped**. Tree
 clean, `0 0` against origin.
+
+*(That was the count on the day of this run. The suite has since grown to 392
+passed / 1 skipped with the F3 and provenance work. Left as recorded — this
+document is a dated report, not a live status page.)*
