@@ -2,6 +2,27 @@
 
 *A field guide to fundamental and advanced Retrieval-Augmented Generation — general theory and the technique landscape, anchored throughout in the real evolution of one system (the KnowAll DocumentBot: FastAPI, Qdrant, Redis/ARQ, Ollama, Next.js).*
 
+> ### Which numbers here were measured, and which were not
+>
+> This document was written before the 2026-08 remediation and **nothing in it
+> had ever been verified against the code**. Every project-specific claim was
+> traced on **2026-08-14**. The result, in full:
+>
+> | claim | verdict |
+> |---|---|
+> | §3 int8 scalar quantization "used in this project" | **verified** — `qdrant_store.py:191`, and live: `{'scalar': {'type': 'int8', 'quantile': 0.99, 'always_ram': True}}` |
+> | §18 OCR turned a 162-page scanned PDF from zero chunks into 191 | **verified exactly** — `ABC DELF junior A2.pdf`: 191 chunks, max page 162, in the live collection |
+> | §14 Anthropic's ~49% / ~67% contextual-retrieval figures | **attributed to a published source**, not a measurement of this system |
+> | §3 quantization ratios (~4×, ~10–60×, ~32×), §3 Matryoshka 2–4× | **general literature**, correctly hedged; not claims about this build |
+> | §9 the reranker-swap before/after | **REMOVED** — unsourced, untraceable, and crediting a change that was never made. See the note in §9. |
+> | §4 "the baseline audit found the prefixes missing entirely — a measurable recall loss" | **unverified.** The prefixes exist (`integrations/embeddings.py:26–27`) and the mechanism is real, but no measurement of that loss is recorded anywhere. No figure is stated, so nothing was removed. |
+>
+> **Two of three checkable project measurements verified precisely; one section
+> carried fabricated figures.** Parts I and III–IV are general RAG theory and
+> technique survey, and are not claims about this build at all. Read §§6–11 as
+> narrative rather than as measurement: where a number matters, `HANDOFF.md`,
+> `rag_fact_sheet.yaml` and `RAG_FIELD_GUIDE.md` are the measured sources.
+
 ---
 
 # Part I — Fundamentals
@@ -127,11 +148,31 @@ The lesson that ordered the entire roadmap: **before any retrieval sophisticatio
 
 1. **Hybrid recall** — each point carries two named vectors: dense (semantic) and BM25 sparse (lexical, IDF server-side); both legs queried in parallel with metadata filters applied *inside each leg*.
 2. **Reciprocal Rank Fusion** — merge the two ranked lists by rank position: `score = Σ 1/(60 + rankᵢ)`. Rank-based fusion exists because cosine and BM25 scores are incommensurable; RRF needs no per-corpus calibration.
-3. **Cross-encoder reranking** — the fused top ~20 re-scored by a model that reads query and chunk *together*; sigmoid-mapped scores gated by a floor threshold, where an empty post-floor result triggers instructed abstention.
+3. **Cross-encoder reranking** — the fused top ~20 re-scored by a model that reads query and chunk *together*; sigmoid-mapped scores, with an abstention decision taken on the best candidate.
+   *This project no longer uses the single-floor form described in the general literature.* One threshold deciding both "is anything relevant" and "which is most relevant" was measured to discard correct answers — a first-place answer scoring 0.16 thrown away by a 0.25 bar — because a cross-encoder's absolute score tracks chunk **shape** (prose vs table vs OCR) as much as relevance. It is now split: `rerank_score_floor: 0.0` (off) plus a separate `abstention_score_floor: 0.01`. The measured account is in `RAG_FIELD_GUIDE.md`, "The case that justifies the method"; the shipped values are in `HANDOFF.md` §1.
 
 **Why the cascade shape.** Bi-encoders are O(1) per query against a precomputed index but lossy; cross-encoders are accurate but O(n) forward passes. Use each where it is cheap: bi-encoder recall over millions, cross-encoder precision over twenty. The floor converts the reranker from a sorter into a *relevance judge* — the mechanism that makes honest abstention possible.
 
-**Why calibration is empirical.** The project's evaluation harness made the abstract concrete: hybrid recall@20 was 0.952 — retrieval was fine — but the default reranker (`bge-reranker-base`, EN/ZH-trained) scored relevant *French* chunks near zero and scored CSV rows containing the literal word "Australia" at 0.99 for "What is the capital of Australia?". No floor value fixes a miscalibrated model. Swapping to a multilingual reranker moved hit@5 from 0.857 → 0.952 and abstention accuracy from 0.5 → 1.0. Invisible without a golden set; a one-line fix with one.
+**Why calibration is empirical.** The project's evaluation harness made the abstract concrete: hybrid recall at fetch was high — retrieval was fine — but the default reranker (`bge-reranker-base`, EN/ZH-trained) scored relevant *French* chunks near zero, and scored CSV rows containing the literal word "Australia" at 0.99 for "What is the capital of Australia?". No floor value fixes a miscalibrated model. The lesson stands and is the section's point: a floor is a threshold on a score, and a threshold cannot repair a score that is measuring the wrong thing. Invisible without a golden set; visible immediately with one.
+
+> **A sentence was removed from this paragraph on 2026-08-14** — a before/after
+> pair of retrieval and abstention figures crediting a swap to a multilingual
+> reranker. The removal is recorded here rather than made silently; the exact
+> text is in the commit that removed it, and is deliberately not reprinted.
+>
+> **No such swap is in force.** The shipped reranker is `BAAI/bge-reranker-base`
+> — `core/config.py:245`, `docs/rag_fact_sheet.yaml:59` and the provenance tuple
+> of `eval/baselines/tier-b-retrieval-2026-08-14.json` all agree. That is the
+> same model this paragraph blames for scoring French near zero.
+>
+> **Neither figure could be traced or reproduced.** The "before" value appears
+> nowhere else in this repository. The "after" value collides with an unrelated
+> `recall_at_fetch` measurement on a different corpus, from which the pair
+> appears to have been assembled.
+>
+> Removed rather than qualified: a reader who sees a hedged number still carries
+> the number, and this document is written for readers who will not check it
+> against the code. **Cross-lingual retrieval remains open** — `HANDOFF.md` §12.
 
 ## 10. Shift 4 — Context Assembly and Query Understanding
 
