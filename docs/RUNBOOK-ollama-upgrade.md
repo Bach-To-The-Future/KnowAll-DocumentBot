@@ -65,6 +65,32 @@ tag in a comment for readability, exactly as `api/Dockerfile` does.
 
 ### Immediately after the upgrade — BEFORE pulling any generator
 
+> **This window no longer opens by itself, and you have to force it.** Two
+> changes closed it, neither of them intended to:
+>
+> 1. The ollama `entrypoint` in `docker-compose.yml` **auto-pulls both models**
+>    on start (`… || ollama pull nomic-embed-text ; … || ollama pull
+>    llama3.2:1b`). So `docker compose up -d --force-recreate ollama` — the
+>    rollback command in this very runbook — arrives with the generator already
+>    present.
+> 2. Since `9f821b3` (finding F4/F5) the healthcheck **requires both models
+>    resident** before reporting healthy. A container deliberately held without a
+>    generator now reads as unhealthy, which is correct for normal operation and
+>    inconvenient here.
+>
+> To hold the window, start ollama with the auto-pull bypassed and only the
+> embedder present:
+>
+> ```sh
+> docker compose run --rm --entrypoint "" -d --name ollama-probe ollama >     bash -c "ollama serve & until ollama list >/dev/null 2>&1; do sleep 1; done; >              ollama list | grep -q '^nomic-embed-text ' || ollama pull nomic-embed-text; wait"
+> # fingerprint against this container, then remove it and bring the stack up normally.
+> ```
+>
+> **Do not weaken the healthcheck to make this step convenient.** Its whole
+> purpose is that `up -d --wait` must not report ready while the generator is
+> absent — that was F4, and it made the generator-identity guard a no-op in
+> exactly that window.
+
 ```sh
 docker compose exec api python scripts/embedding_fingerprint.py --verify
 ```
