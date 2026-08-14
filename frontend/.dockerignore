@@ -6,3 +6,6 @@ e2e
 playwright.config.ts
 test-results
 playwright-report
+# Never ship a host's incremental type-check state into the image build:
+# stale fileInfos can make tsc skip work it should redo.
+tsconfig.tsbuildinfo
