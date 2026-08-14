@@ -5,7 +5,7 @@ dependency bumps including a starlette major, four R1 guards, the R2 output
 pipeline, new provenance fields, and the memory and concurrency changes — run
 together for the first time.
 
-**Five findings. Four fixed, one filed with a proposal.** The assembled system did not come up
+**Five findings, all five now closed.** The assembled system did not come up
 clean, which was the expected result and the reason for running it.
 
 ---
@@ -182,7 +182,7 @@ because every prior eval ran in a tree that already had the files.
 
 Verified by cloning fresh: `corpus OK: 13 documents verified`.
 
-### F3 — the eval corpus cannot be ingested by the code that ships · FILED, PROPOSED
+### F3 — the eval corpus cannot be ingested by the code that ships · FIXED `35ec4a2`
 
     b04-wide-row.csv -> 1 chunk, 13,308 chars, ~4,828 tokens
                         against a 2,048-token embedding limit
@@ -201,13 +201,20 @@ The irony is exact: **that fixture was authored to prove finding #19's
 oversized-row path was reachable, and the guard built for #19 now refuses to
 ingest it.**
 
-Not fixed. Three options — split oversized rows at chunking (R5, changes stored
-text, invalidates every baseline); exclude the file from ingestion while keeping
-it as a unit fixture (manifest changes, so baselines still become incomparable,
-but no stored text moves and no reindex is needed); or raise the boundary, which
-is **wrong** — 2,048 is the model's real limit and raising it reinstates the
-silent truncation that is finding #19 itself. **Recommended: option 2**, with the
-reasoning in `HANDOFF.md` open question 3. Not acted on.
+Resolved by option 2, approved: `ingest: false` in the manifest — verified,
+hashed and kept, never embedded. Option 3 (raise the boundary) was wrong: 2,048
+is the model's real limit and raising it reinstates the silent truncation that is
+finding #19 itself. Option 1 (split oversized rows at chunking) was **not**
+taken, and is now filed as its own open question — it is a retrieval-quality
+decision and is untestable until a corpus of real wide tables exists.
+
+The proposal missed one thing: four golden entries depend on b04, so excluding it
+without touching the golden set would have baked two guaranteed false abstentions
+and one free correct-abstention into the reference baseline. `run_eval.py` now
+drops entries whose required documents are not indexed, derived from the manifest.
+
+The eval corpus now ingests from scratch: **17 chunks, 12 documents, 1 kept as a
+fixture** — the first time this has ever succeeded on the shipping code.
 
 ### F4 — `up -d --wait` reports healthy before the system can serve · FIXED `9f821b3`
 
@@ -253,20 +260,30 @@ comparator now **refuses to diff** any of them against a current run:
       enable_ocr:   old None -> new True
 
 That is correct — a baseline that never recorded its denominators cannot be shown
-to measure the same population — but it means the regression gate is
-**configured, correct, and referenceless**. Recording a fresh baseline is blocked
-on F3. Metrics were compared by value instead, and are identical. Carried into
-`HANDOFF.md` as a live gap, not a cleanup task.
+to measure the same population — but it meant the regression gate was
+**configured, correct, and referenceless**.
+
+**Closed.** Two reference baselines are now recorded (`d2c0185`), retrieval and
+full, 46 provenance fields each with nothing `"unknown"` or `"unpinned"`. All
+three comparator outcomes were forced against them — `COMPARABLE` on a repeat
+run, `INCOMPARABLE` against a pre-R4 file, `FAIL` on a planted regression. The
+first of those had never been run: a reference nobody has diffed is a reference
+nobody has tested.
+
+Recording them surfaced one more gap. A full-mode baseline pinned its generator
+by `llama3.2:1b` — a **moving tag** — and nothing else, while `run_eval.py`
+already read the digest and discarded it. `llm_model_digest` is now a hard field
+in full mode (`17e8fd6`). Third instance of the class already on record: the
+comparator only catches drift in fields someone thought to include.
 
 ---
 
 ## What could not be verified
 
-- **The eval from a clean clone**, blocked by F3. Verified in the restored
-  environment instead, where the collection already existed.
-- **Full-mode eval.** Not run: it requires `ENABLE_ANSWER_CACHE=false` and an
-  ollama restart between runs, and at ~106 s per query with a ceiling of 1 the
-  run exceeds the time available. Retrieval mode was run and is deterministic.
+- ~~**The eval from a clean clone**, blocked by F3.~~ **Now possible** — the
+  corpus ingests from scratch (17 chunks / 12 documents) since `35ec4a2`.
+- ~~**Full-mode eval.** Not run.~~ **Now recorded** as a reference baseline:
+  2 runs, `ENABLE_ANSWER_CACHE=false`, generator pinned by digest, spread 0.000.
 - **A genuinely cold Docker layer cache.** ~20 GB of layers; infeasible here.
 - **First-run model pull times on a metered link.** Measured 1.5 s / 1.3 s,
   implausibly fast; a lower bound, not a general number.

@@ -573,34 +573,82 @@ something no commit can fix, or invite softening the gate on its first execution
 embedding-model identity, golden-set schema, rewrite-branch agreement and
 retrieval determinism on PRs; nightly full mode reporting spread without gating.
 
-**Metric-regression comparison is INACTIVE, and now has a second reason.**
+**Metric-regression comparison is ACTIVE. The gate has a reference.**
 
-The original reason stands: no baseline is both provenance-complete and drawn
-from real documents, so the job warns rather than passing silently.
+It did not, for most of this engagement. All four older baselines predate the R4
+provenance fields, so the comparator correctly **refused to diff** any of them —
+a baseline that never recorded its denominators cannot be shown to measure the
+same population — and the gate was configured, correct, and **referenceless**.
+Recording a fresh one was blocked on the eval corpus being uningestible.
 
-**The gate is now also referenceless.** All four committed baselines predate the
-R4 provenance fields, so the comparator correctly **refuses to diff any of
-them** against a current run:
+Both are recorded, and both are *references* rather than diagnostics: 46
+provenance fields, none `"unknown"`, none `"unpinned"`.
 
-    REFUSING TO DIFF — these baselines do not measure the same thing:
-      n_answerable: old None -> new 15
-      enable_ocr:   old None -> new True
+| | `tier-b-retrieval-2026-08-14` | `tier-b-full-2026-08-14` |
+|---|---|---|
+| runs / tolerance | 3 / 0.05 | 2 / 0.10 |
+| n answerable + unanswerable | 13 + 9 | 19 + 9 |
+| recall@fetch | 1.000 | 1.000 |
+| hit@k · mrr@k | 0.846 · 0.846 | 0.789 · 0.789 |
+| false / correct abstention | 0.154 / 0.222 | 0.211 / 0.222 |
+| spread across runs | 0.000 | 0.000 |
 
-That refusal is right — a baseline that never recorded its denominators cannot
-be shown to measure the same population. But the consequence is that the gate is
-**configured, correct, and has nothing to compare against.**
+**Read these as a new zero, not as a delta.** They are not comparable to any
+earlier number and the comparator says so: the corpus manifest hash moved, and
+the population changed by construction when the b04-dependent entries were
+dropped. An "improvement" measured against an August 3–5 file would be a
+population artefact (R11).
 
-Recording a fresh baseline is blocked on open question 3: the eval corpus cannot
-be ingested by the code that ships, so a reference baseline cannot currently be
-produced from a clean environment. **This is a live gap, not a cleanup task** —
-until it is closed, retrieval quality is protected by nothing automatic, and
-comparisons must be made by value against numbers recorded in this document.
+**The gate is tested, not merely present.** All three outcomes were forced:
+
+    reference vs an independent repeat run  -> COMPARABLE,   exit 0, deltas 0.000
+    reference vs a pre-R4 baseline          -> INCOMPARABLE, exit 2
+    reference vs a planted -0.246 hit@k     -> FAIL,         exit 1
+
+The first of those had never been run before. A reference nobody has diffed is a
+reference nobody has tested.
+
+*Two caveats that survive.* Tier B is synthetic and adversarial, so these are not
+a headline quality number — they are a **change-detector**, and that is all they
+are claimed to be. And the 0.000 spread is a property of temperature 0 on a small
+set, not a general claim; the tolerances stay as recorded because a real corpus
+will not be deterministic.
 
 ---
 
 # 10. Findings, restated
 
 ## Fixed
+
+**The evaluation corpus could not be ingested by the code that ships.** The
+fixture authored to prove finding #19's oversized-row path was *reachable* was
+then refused by the guard built for #19 — both correct, and mutually exclusive.
+It survived unnoticed because the eval collection was never rebuilt from
+scratch after the guard landed, so **every committed baseline had been produced
+against a collection today's code could not create**.
+
+`b04-wide-row.csv` now carries `ingest: false` in `MANIFEST.yaml`: verified,
+hashed and byte-pinned like every other document, but never embedded. It is part
+of the corpus *definition* and not of the *index*. It stays because it is the
+only artefact proving that boundary is reachable on a real file — every other
+token-budget test uses text this repository invented to be too long, which
+proves the check works rather than that anything triggers it.
+
+*The consequence the proposal missed.* Four golden entries depend on that
+document, and scoring them against an index that lacks it would have corrupted
+the very baseline the work existed to produce: two answerable entries (three in
+full mode) become guaranteed false abstentions, and the unanswerable *"how many
+days notice for CT-9002?"* — authored as a near miss against b04's CT-9001 —
+degrades into a freebie that inflates `correct_abstention_rate`. `run_eval.py`
+now drops entries whose required documents are not indexed, **derived from the
+manifest** rather than from a list, so what is indexed and what is scored cannot
+drift apart. The population change is therefore visible in the hard denominators
+rather than silent.
+
+*What this did not decide.* Whether row-based chunking should split oversized
+rows — that is question 3 in §12, and it is untestable until a corpus of real
+wide tables exists. `eval/ingest_corpus.py`, `eval/corpus/verify.py`,
+`tests/unit/test_token_budget.py`.
 
 **The rerank threshold discarded correct answers.** One number decided both
 "is anything relevant" and "which is most relevant". A correctly-ranked
@@ -857,41 +905,41 @@ serves. Schedule it, do not sneak it.
 is not a candidate of this alias and refuses one the alias points at. Previously
 a failed swap left a verified candidate with no removal path but the raw API.
 
-**3. The eval corpus cannot be ingested by the code that ships. (R5 — proposed,
-not implemented.)**
+**3. Should row-based chunking split oversized rows? (NEW — the question F3 was
+not allowed to answer.)**
 
-`eval/ingest_corpus.py` fails on the committed tier-B corpus:
+A single CSV row can be wider than the whole embedding window. `b04-wide-row.csv`
+is one: ~4,828 tokens against a 2,048-token limit, in **one** row. Row-based
+chunking splits *between* rows, never *within* one, so `table_chunk_char_budget`
+is unenforceable for it and the token-budget guard refuses the document rather
+than admit a silently truncated vector.
 
-    b04-wide-row.csv -> 1 chunk, 13,308 chars, ~4,828 tokens
-                        against a 2,048-token embedding limit
+Today that document is excluded from the index and kept as a unit fixture, which
+resolved the immediate blockage (see *Resolved* below). **It did not answer the
+underlying question**, and deliberately so: whether wide rows should be split at
+chunking is a retrieval-quality decision, and deciding it as a side effect of
+making a fixture ingestible would be the tail wagging the dog.
 
-**The irony is exact.** That fixture was authored to prove finding #19's
-oversized-row path was reachable — and the guard built for #19 now refuses to
-ingest it. It is the only tier-B document over the limit. A single CSV row is
-wider than `table_chunk_char_budget`, and row-based chunking cannot split
-*within* a row, so the budget is unenforceable for it and the guard correctly
-declines rather than admit a silently-truncated vector.
+*What splitting would mean.* Sub-row chunks would carry partial records — half a
+contract row, with its header context but not its remaining fields. Whether that
+helps or hurts depends on what wide tables actually look like in the target
+corpus: a wide row that is a *list* of independent fields splits cleanly, and one
+that is a *single semantic unit* does not, and both exist in real data.
 
-**Consequence: every committed baseline was produced against a collection
-today's code cannot create.** The eval collection was built before the
-token-budget guard landed and has never been rebuilt from scratch. Nobody
-noticed because nobody ever built it from nothing.
+*Why it cannot be decided now.* **It is untestable until there is a corpus with
+real wide tables.** The only wide table in the repository is synthetic — it was
+authored to be over the limit, not because a real document was. Fitting a
+chunking rule to a fixture that was constructed to break a boundary would
+measure the fixture, not the decision. That puts this **behind tier A**, with the
+rest of the questions blocked on real documents (see question 5 below), and it
+should be decided on evidence from those documents rather than from this one.
 
-*Three options, and the third is wrong:*
-
-| option | cost |
-|---|---|
-| **split oversized rows at chunking** | changes stored text for every wide table → invalidates every baseline → needs a reindex. R5, retrieval-quality. |
-| **exclude the file from ingestion, keep it as a unit fixture** | corpus manifest changes (a hard provenance field), so baselines still become incomparable — but no stored text moves and no reindex is needed. The fixture keeps proving the boundary is reachable, which is its job. |
-| ~~raise the boundary~~ | **wrong.** 2,048 is the model's real limit; raising it reinstates silent truncation, which is finding #19 itself. |
-
-**Recommendation: option 2.** The fixture's purpose is to demonstrate that the
-oversized-row path is reachable, and it still does that as a unit fixture — it
-does not need to be *in the index* to prove it. Option 1 is a retrieval-quality
-change made to accommodate a test document, which is the tail wagging the dog,
-and it should be taken on its own merits if wide-table chunking is genuinely
-wrong. Both options invalidate the baselines, so neither is cheap; option 2 at
-least does not move stored text.
+*If it is taken up:* it changes stored text for every wide table, so it
+invalidates the baselines recorded on 2026-08-14, requires a reindex, and is an
+R5 change requiring sign-off. `b04-wide-row.csv` becomes ingestible again by
+flipping `ingest: false` in `eval/corpus/MANIFEST.yaml`, and
+`test_the_excluded_fixture_is_excluded_in_the_manifest_too` is the test that will
+fail to remind you the two decisions are linked.
 
 **4. If the incumbent is kept, do the container limits still hold?**
 They have been re-derived from measurement rather than reverted: api 3→5 GiB,
