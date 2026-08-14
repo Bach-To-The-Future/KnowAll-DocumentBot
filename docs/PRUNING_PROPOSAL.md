@@ -425,6 +425,39 @@ where the reverse-dependency check in the lockfile was needed to confirm it.
 
 ---
 
+## Execution results
+
+Executed 2026-08-14 in the sequence below, one category per commit, gates green
+between each. **Two of the three size estimates were wrong, both because they
+mixed measurement bases** — recorded here rather than quietly restated.
+
+| item | estimated | measured | commit |
+|---|---|---|---|
+| R-2 tsbuildinfo | 103 KB | 103 KB | `6e83b83` |
+| B-2 `check_qdrant.py` | 1 line | **2** — `api_key` alone turns 401 into an SSL failure | `0db616b` |
+| B-1 smoke script renames | — | collection no longer fires network calls | `6483259` |
+| B-3 doc corrections | 6 claims | 4 fixed, 1 already correct, **1 withdrawn** | `70d2a93` |
+| R-1 image prune | image → 7.0 GB | **layer sum 5.63 → 2.30 GB (−59%)**; `docker images` 10 → 3.69 GB | `8f65a0e` |
+| R-3 `minio` | 1 package | **4** — took `argon2-cffi`, `argon2-cffi-bindings`, `pycryptodome`; nothing added | — |
+| R-4 dead images | ~41 GB | **20.3 GB** (142.4 → 122.1 GB) | environment only |
+
+**The two estimate errors share one cause.** R-1's 7.0 GB subtracted a
+`du`-measured content delta from a `docker images` on-disk total; R-4's 41 GB
+summed the reported SIZE of seven images that **share layers with each other and
+with the live images**, so deleting them frees only the unreferenced remainder.
+In both cases `docker images` SIZE is not additive and is not the same quantity
+as layer content. The reproducible figure for R-1 is the layer sum; for R-4 it is
+the `docker system df` delta.
+
+**The withdrawn item is the one worth reading.** Repointing a stale comment in
+`eval/corpus/MANIFEST.yaml` moved `manifest_sha256` from `ccb0fba9…` to
+`f30fb62e…`, because the hash covers the whole file including comments. That is
+a HARD provenance field and the etag every point ID derives from, so a *comment
+fix* would have invalidated both reference baselines and forced a re-ingest.
+Attempted, measured, reverted. **MANIFEST.yaml has no free edits.**
+
+---
+
 ## Recommended sequence
 
 One category per commit, CI green between each (D3).
