@@ -730,6 +730,51 @@ regression guard, not a rescue.
 
 # 11. Not fixed — and what each would take
 
+**P1 — OPERATIONAL: every compose project built from this file shares one set of
+volumes, so `docker volume prune` destroys the production collection.**
+
+`docker-compose.yml` declares its volumes with an explicit `name:` and **no
+project prefix**:
+
+```yaml
+volumes:
+  qdrant_data:
+    name: qdrant_data          # NOT knowall-documentbot_qdrant_data
+```
+
+Compose normally namespaces volumes per project. `name:` overrides that. Two
+consequences, and the second is the dangerous one:
+
+**1. Clean rooms were never isolated.** A checkout in a different directory is a
+different compose project, but it binds the *same four volumes*: `qdrant_data`,
+`minio_data`, `ollama_data`, `redis_data`. Any `up` in a second working tree
+mounts the live production data, and any `down -v` there destroys it. This is
+the retroactive explanation for why the audit's clean rooms had to have their
+volumes backed up and restored by hand — that was not caution, it was the only
+thing standing between a clean-room run and the real collection.
+
+**2. A routine prune is destructive.** There are **271 dangling volumes** on the
+reference machine and the live ones are not distinguishable from the dead ones
+by naming convention — they carry no project prefix to sort on. `docker volume
+prune`, `docker system prune --volumes`, and `docker compose down -v` from any
+clone are all one keystroke from deleting `qdrant_data`.
+
+**Mitigations, in order of what they cost:**
+
+| | |
+|---|---|
+| **today, free** | Never run a blanket volume prune. Remove volumes by explicit name. Never `docker compose down -v` outside the primary tree. Take a snapshot first: `scripts/snapshot.py`. |
+| **cheap, partial** | Set `COMPOSE_PROJECT_NAME` per checkout. Does **not** fix it on its own — `name:` still wins — but it makes containers and networks unambiguous while the volumes are being sorted out. |
+| **the real fix (R5)** | Drop the `name:` overrides and let compose namespace them, or prefix them explicitly (`knowall_qdrant_data`). |
+
+**Not implemented, deliberately.** Renaming a volume does not move the data —
+it **orphans it**. The existing `qdrant_data` would be left unreferenced (and
+indistinguishable from the 271 others) while the stack came up against a new,
+empty volume. Doing it safely means: snapshot, rename, restore into the new
+volume, verify point counts, then delete the old one by name. That is a data
+migration under R5, not a compose edit. *Would take:* the migration above, plus
+a decision on whether existing deployments are expected to follow it.
+
 **The rerank score measures topical relevance, not answer presence.**
 Near-miss questions — where the corpus covers the topic but not the fact —
 score **0.70–0.997**, higher than most correct answers. No absolute threshold

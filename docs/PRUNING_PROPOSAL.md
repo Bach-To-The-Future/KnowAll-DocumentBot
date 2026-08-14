@@ -215,8 +215,12 @@ docker rmi 196a77e09fea 47ce268dddb7 3f4cb4a1ede4 \
            d40b688fcdc1 e93835f3eeac 2a3914b3b9e7 2bccc125fd2c
 ```
 
-**Do NOT run `docker system prune -a` or `docker volume prune`.** The compose
-file declares its volumes with an explicit `name:` and **no project prefix**:
+**Do NOT run `docker system prune -a` or `docker volume prune`.** This is no
+longer a caveat on this item — it is filed as a **P1 operational hazard** in
+`HANDOFF.md` §11, because it is true whether or not anything is ever pruned.
+Summarised here only so this instruction is not followed in isolation. The
+compose file declares its volumes with an explicit `name:` and **no project
+prefix**:
 
 ```yaml
 volumes:
