@@ -1,5 +1,7 @@
-# File storage
-minio==7.2.15
+# File storage. boto3 only: integrations/object_storage.py talks S3 to MinIO.
+# The `minio` SDK was declared here and imported nowhere -- removed 2026-08-14
+# after a reverse-dependency check showed nothing else required it
+# (`# via -r api/requirements.in` and nothing more). Same class as `requests`.
 boto3==1.38.31
 
 # Data manipulation
