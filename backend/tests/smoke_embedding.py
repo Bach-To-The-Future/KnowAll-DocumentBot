@@ -1,7 +1,12 @@
 """Manual smoke test for the Ollama embedding endpoint (batched /api/embed —
 the /api/embeddings endpoint the app used previously is deprecated).
 
-Run inside the api container: python tests/test_embedding.py
+    docker compose exec api python tests/smoke_embedding.py
+
+RENAMED from test_embedding.py: it has no test function, but pytest imports a
+module to collect it and this body performs a real HTTP embedding call. See
+smoke_ollama.py for the measurement. The smoke_ prefix removes it from the
+discovery pattern rather than relying on testpaths staying narrow.
 """
 import httpx
 
