@@ -1,5 +1,13 @@
 # Final end-to-end verification
 
+> **What this document answers:** *does the audit's verdict still hold* once
+> twelve unexercised changes are run together. Its findings are `F1`–`F5`.
+>
+> For the findings this remediation was built from — `P0-n`…`P3-n`, and the
+> anti-pattern catalogue — see **`FINAL_AUDIT.md`**. This document is a dated
+> report: figures in it record what was measured **on 2026-08-13** and are
+> deliberately not updated as the system changes.
+
 2026-08-13. Twelve unexercised changes since the last full audit — three
 dependency bumps including a starlette major, four R1 guards, the R2 output
 pipeline, new provenance fields, and the memory and concurrency changes — run

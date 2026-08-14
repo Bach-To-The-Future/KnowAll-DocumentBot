@@ -1,5 +1,14 @@
 # KnowAll DocumentBot — end-to-end audit
 
+> **What this document answers:** *what is wrong with this system.* Findings
+> are numbered `P0-n`…`P3-n` and cited by ID from `HANDOFF.md`, the field
+> guide, `requirements.in` and `core/admission_limits.py`.
+>
+> For *whether the verdict below still holds after the remediation*, see
+> **`FINAL_VERIFICATION.md`**, which re-ran the assembled system and numbers
+> its own findings `F1`–`F5` precisely so found-here and confirmed-later stay
+> distinguishable.
+
 2026-08-10/11. Two jobs: re-derive what the repository contains from the tree,
 and prove the system works for a real user from a cold start through the browser
 path on the configuration that ships.
