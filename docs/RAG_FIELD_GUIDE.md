@@ -1047,6 +1047,35 @@ orphaned*, confirm the search covered everywhere the thing could be. **A tool's
 plausible answer costs more to check than its absurd one** — the absurd result is
 the lucky case.
 
+### 13. The same sentence can be a defect in one document and correct in another
+
+*The failure.* A documentation audit found the sentence *"the images are 10 GB
+each"* in two files. One was a setup table; one was a dated verification report.
+The images are now 3.68 GB. The first is a **defect** — it is read as current and
+a reader will size a disk from it. The second is **correct and must not be
+touched** — it records what was measured on a stated date, and it is the evidence
+for the 3.1 GB saving. Rewriting it would destroy the proof that the improvement
+happened.
+
+Identical text. Opposite verdicts. The deciding question is not *is it true now*
+but **is this document read as current, or as a record of a moment**.
+
+*Why this matters more than it looks.* The obvious way to audit documentation is
+to grep for claims that no longer hold and fix them all. That procedure
+systematically destroys evidence: retraction notes, dated audits, and baselines
+all contain statements that are false *now* and are load-bearing *because* they
+are preserved. **A retraction whose evidence has been tidied away is an
+unsupported assertion**, and the tidying looks like diligence.
+
+*Detection heuristic:* before correcting any factual claim in documentation, ask
+what the document is **for**. Entry points (setup guides, runbooks, READMEs) are
+promises about the present — correct them, and duplication between them is a
+hazard because copies drift. Records (audits, retractions, changelogs, recorded
+baselines) are testimony about a past state — annotate them, date them,
+cross-reference them, but **do not update their numbers**. If you cannot tell
+which kind a document is, that ambiguity is itself the defect: fix it by giving
+the document a header that says which it is.
+
 ---
 
 # Part VII — Anti-pattern catalogue
