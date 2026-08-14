@@ -316,11 +316,22 @@ condition, not vigilance.
 
 | step | measured | note |
 |---|---|---|
-| `docker compose build` | **2576.7 s (~43 min)** | with a **warm** Docker layer cache; a cold cache is slower. Both backend images are 10 GB. |
+| `docker compose build` | **2576.7 s (~43 min)** — see note | with a **warm** Docker layer cache; a cold cache is slower. Backend images are **3.68 GB** each (api and worker are byte-identical, so the pair costs ~3.7 GB, not 7.4). |
 | `docker compose up -d --wait` | 35.1 s | 7/7 services healthy |
 | `ollama pull nomic-embed-text` | 1.5 s | implausibly fast; the volume was fresh and the write real, but a fast link or CDN cache could not be ruled out. **Treat as a lower bound.** |
 | `ollama pull llama3.2:1b` | 1.3 s | same caveat |
 | first query | ~106 s | full context, cache defeated, on the production corpus |
+
+> **The 3.68 GB figure is current; the 43-minute figure is not re-measured.**
+> The images were 10 GB when this table was written. `8f65a0e` removed 3.1 GB of
+> duplicated reranker weights (`PRUNING_PROPOSAL.md` R-1), and the size above was
+> measured after it.
+>
+> The build time was **not** re-measured under the same conditions. The two
+> rebuilds since took 35m46s and ~35m, both with the model layer **cold** — the
+> opposite of the warm-cache condition this row states. A cold-layer build now
+> downloads 3.1 GB less, so the true warm-cache figure is probably lower, but
+> "probably lower" is not a measurement and is not written here.
 
 **The build step is not in the commands below and dominates the time.**
 `up -d` performs it implicitly. That omission is why "10 minutes" survived so
